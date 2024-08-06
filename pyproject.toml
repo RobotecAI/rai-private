@@ -42,6 +42,7 @@ faiss-cpu = "^1.8.0.post1"
 rich = "^13.7.1"
 docx2txt = "^0.8"
 pypdf = "^4.2.0"
+langchain-ollama = "^0.1.1"
 
 streamlit = "^1.37.1"
 [tool.poetry.group.dev.dependencies]

@@ -15,12 +15,21 @@
 
 import logging
 from abc import ABCMeta, abstractmethod
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
+import rcl_interfaces.msg
 import rclpy
 import rclpy.callback_groups
+import rclpy.qos
+import std_msgs.msg
+import std_srvs.srv
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama
 from rclpy.node import Node
+
+from rai.run_task import run_task
 
 
 class RaiActionStoreInterface(metaclass=ABCMeta):
@@ -136,12 +145,87 @@ class RaiActionStore(RaiActionStoreInterface):
         return self._feedbacks[uid]
 
 
+class RosoutBuffer:
+    def __init__(self, bufsize: int = 100) -> None:
+        self.bufsize = bufsize
+        self._buffer: Deque[str] = deque()
+        self.template = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "Shorten the following log keeping its format - for example merge simillar or repeating lines",
+                ),
+                ("human", "{rosout}"),
+            ]
+        )
+        llm = ChatOllama(model="llama3.1")
+        self.llm = self.template | llm
+
+    def append(self, line: str):
+        self._buffer.append(line)
+        if len(self._buffer) > self.bufsize:
+            self._buffer.popleft()
+
+    def get_raw_logs(self) -> str:
+        return "\n".join(self._buffer)
+
+    def summarize(self):
+        if len(self._buffer) == 0:
+            return "No logs"
+        buffer = self.get_raw_logs()
+        response = self.llm.invoke({"rosout": buffer})
+        return str(response.content)
+
+
 class RaiNode(Node):
     def __init__(self):
         super().__init__("rai_node")
 
         self.callback_group = rclpy.callback_groups.ReentrantCallbackGroup()
         self._actions_cache = RaiActionStore()
+
+        self.rosout_buffer = RosoutBuffer()
+        self.state_client = self.create_client(
+            std_srvs.srv.Trigger, "/rai/state", callback_group=self.callback_group
+        )
+
+        self.rosout_sub = self.create_subscription(
+            rcl_interfaces.msg.Log,
+            "/rosout",
+            callback=self.rosout_callback,
+            callback_group=self.callback_group,
+            qos_profile=rclpy.qos.qos_profile_sensor_data,
+        )
+        self.rosout_summary_service = self.create_service(
+            std_srvs.srv.Trigger,
+            "rai_rosout_summary_service",
+            self.log_summary_callback,
+            callback_group=self.callback_group,
+        )
+
+        self.task_sub = self.create_subscription(
+            std_msgs.msg.String,
+            "/task_addition_requests",
+            callback=self.task_callback,
+            callback_group=self.callback_group,
+            qos_profile=rclpy.qos.qos_profile_sensor_data,
+        )
+
+    def task_callback(self, msg: std_msgs.msg.String):
+        # task_dict = json.loads(msg.data)
+        # task = Task(**task_dict)
+        self.get_logger().info(f"Received task: {msg.data}")
+        run_task(self, msg.data)
+
+    def rosout_callback(self, msg: rcl_interfaces.msg.Log):
+        self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
+
+    def log_summary_callback(self, request, response):
+        response.success = True
+        self.get_logger().info(f"Raw log\n{self.rosout_buffer.get_raw_logs()}")
+        response.message = self.rosout_buffer.summarize()
+        self.get_logger().info(f"Summary:\n{response.message}")
+        return response
 
     def get_actions_cache(self) -> RaiActionStoreInterface:
         return self._actions_cache
@@ -166,3 +250,17 @@ class RaiNode(Node):
         feedback = feedback_msg.feedback
         self.get_logger().debug(f"Received feedback: {feedback}")
         self._actions_cache.add_feedback(uid, feedback)
+
+    def get_state(self):
+        self.get_logger().info("Getting state")
+        future = self.state_client.call_async(std_srvs.srv.Trigger.Request())
+        rclpy.spin_until_future_complete(self, future)
+        result: std_srvs.srv.Trigger.Response = future.result()
+        return result.message
+
+
+if __name__ == "__main__":
+    rclpy.init()
+    node = RaiNode()
+    rclpy.spin(node)
+    rclpy.shutdown()

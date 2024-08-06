@@ -35,7 +35,6 @@ from langfuse.callback import CallbackHandler
 from redis import Redis
 
 from rai.history_saver import HistorySaver
-from rai.node import RaiNode
 from rai.scenario_engine.messages import (
     AgentLoop,
     FutureAiMessage,
@@ -106,7 +105,7 @@ class ScenarioRunner:
         self,
         scenario: ScenarioType,
         llm: BaseChatModel,
-        ros_node: RaiNode,
+        ros_node,
         llm_type: Literal["openai", "bedrock"],
         scenario_name: str = "",
         logging_level: int = logging.WARNING,

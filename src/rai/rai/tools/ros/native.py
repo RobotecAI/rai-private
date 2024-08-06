@@ -17,6 +17,7 @@ import json
 from typing import Any, Dict, OrderedDict, Tuple, Type
 
 import rclpy
+import rclpy.node
 import rosidl_runtime_py.set_message
 import rosidl_runtime_py.utilities
 from langchain.tools import BaseTool
@@ -64,7 +65,7 @@ class PubRos2MessageToolInput(BaseModel):
 
 # --------------------- Tools ---------------------
 class Ros2BaseTool(BaseTool):
-    node: Node = Field(..., exclude=True, include=False, required=True)
+    node: rclpy.node.Node = Field(..., exclude=True, include=False, required=True)
 
     args_schema: Type[Ros2BaseInput] = Ros2BaseInput
 
