@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from rai.config.models import OPENAI_MULTIMODAL
 from rai.scenario_engine.messages import AgentLoop
 from rai.scenario_engine.scenario_engine import ScenarioPartType, ScenarioRunner
+from rai.tools.ros.cat_demo_tools import FinishTool
 from rai.tools.ros.native import Ros2ShowMsgInterfaceTool
 from rai.tools.ros.native_actions import (
     Ros2ActionRunner,
@@ -17,7 +18,6 @@ from rai.tools.ros.native_actions import (
     Ros2GetActionNamesAndTypesTool,
     Ros2GetRegisteredActions,
 )
-from rai.tools.ros.tools import GetCurrentPositionTool, GetOccupancyGridTool
 from rai.tools.time import sleep_max_5s
 
 
@@ -35,9 +35,10 @@ def run_task(rai_node, task):
         Ros2CancelAction(node=rai_node),
         # Ros2ListActionFeedbacks(node=rai_node),
         Ros2GetRegisteredActions(node=rai_node),
-        GetCurrentPositionTool(),
-        GetOccupancyGridTool(),
+        # GetCurrentPositionTool(),
+        # GetOccupancyGridTool(),
         sleep_max_5s,
+        FinishTool(),
     ]
 
     scenario: List[ScenarioPartType] = [
@@ -47,7 +48,9 @@ def run_task(rai_node, task):
             "Use the tooling provided to gather information about the environment."
         ),
         HumanMessage(content=task),
-        AgentLoop(tools=tools, stop_tool=None, stop_iters=50),
+        AgentLoop(
+            tools=tools, stop_tool=FinishTool().__class__.__name__, stop_iters=20
+        ),
     ]
 
     runner = ScenarioRunner(
