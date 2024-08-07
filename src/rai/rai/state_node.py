@@ -24,7 +24,8 @@ class RaiState(Node):
         self.subscribers = list()
         self.data = defaultdict(list)
 
-    def configure(self, request, response):
+    def configure(self, _, response):
+        response.success = True
         watch_topics = ["/tf"]
         for t in watch_topics:
             subscriber = self.create_subscription(
@@ -38,7 +39,7 @@ class RaiState(Node):
         self.get_logger().info(f"Configured: {watch_topics=}")
         return response
 
-    def get_state(self, request, response):
+    def get_state(self, _, response):
         response.success = True
         data = dict()
         data["watched_topics"] = list()

@@ -216,6 +216,8 @@ class RaiNode(Node):
         # task = Task(**task_dict)
         self.get_logger().info(f"Received task: {msg.data}")
         run_task(self, msg.data)
+        self.get_logger().info("Finished task")
+        rclpy.spin(self)
 
     def rosout_callback(self, msg: rcl_interfaces.msg.Log):
         self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
