@@ -33,17 +33,21 @@ import sensor_msgs.msg
 import std_msgs.msg
 from cv_bridge import CvBridge
 from langchain.tools import tool
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.graph import CompiledGraph
-from langgraph.prebuilt import ToolNode
 from rclpy.node import Node
 
-from rai.scenario_engine.messages import HumanMultimodalMessage
+from rai.scenario_engine.messages import HumanMultimodalMessage, ToolMultimodalMessage
 from rai.tools.ros.native import Ros2BaseTool
 
 
@@ -231,9 +235,10 @@ class GetCameraImageTool(Ros2BaseTool):
 
     def _run(self):
         if self.node.robot_state.last_image is None:
-            return "Image not available yet"
+            return {"content": "Image not available yet"}
         else:
-            return self.node.convert_ros_img_to_base64(self.node.robot_state.last_image)
+            img = self.node.convert_ros_img_to_base64(self.node.robot_state.last_image)
+            return {"content": "Got image", "images": [img]}
 
 
 def get_camera_image(self):
@@ -246,6 +251,7 @@ class RaiNode(Node):
         self._actions_cache = RaiActionStore()
         self.robot_state = RobotState()
         self.tools = [wait_for_2s, GetCameraImageTool(node=self)]
+        self.tools_by_name = {tool.name: tool for tool in self.tools}
 
         # ---------- ROS Parameters ----------
         self.camera_topic = (
@@ -299,7 +305,7 @@ class RaiNode(Node):
         workflow.add_node("get_robot_state", self.get_robot_state)
         workflow.add_node("reason", self.reason)
         workflow.add_node("should_continue", self.should_continue)
-        workflow.add_node("tools", ToolNode(self.tools))
+        workflow.add_node("tools", self.run_tools)
 
         # ----------  Edges ----------
         workflow.add_edge(START, "get_robot_state")
@@ -323,14 +329,40 @@ class RaiNode(Node):
 
     # ---------- LLM Workflow Nodes ----------
     def reason(self, state: State) -> State:
-        input = (
-            [SystemMessage(content=state["current_task"])]
-            + state["messages"]
-            + [state["robot_state"]]
-        )
+        if len(state["messages"]) > 0:
+            input = (
+                [SystemMessage(content=state["current_task"])]
+                + state["messages"]
+                # + state["messages"][:-2]
+                # # + [state["robot_state"]]
+                # + state["messages"][-1:]
+            )
+        else:
+            input = [SystemMessage(content=state["current_task"]), state["robot_state"]]
+
         msg = self.big_llm.invoke(input)
         state["messages"].append(msg)
         return state
+
+    def run_tools(self, state: State) -> State:
+        result = []
+        for tool_call in state["messages"][-1].tool_calls:
+            tool = self.tools_by_name[tool_call["name"]]
+            observation = tool.run(tool_call["args"])
+            self.get_logger().info(f"Tool observation: {observation}")
+            if isinstance(observation, dict):
+                tool_message = ToolMultimodalMessage(
+                    content=observation.get("content", "No response from the tool."),
+                    images=observation.get("images"),
+                    tool_call_id=tool_call["id"],
+                )
+                tool_messages = tool_message.postprocess(format="openai")
+                result.extend(tool_messages)
+            else:
+                result.append(
+                    ToolMessage(content=observation, tool_call_id=tool_call["id"])
+                )
+        state["messages"].extend(result)
 
     def get_robot_state(self, state: State) -> State:
         last_image = self.robot_state.last_image
@@ -353,6 +385,7 @@ class RaiNode(Node):
         # Check if tool call requested
         last_message = chat_history[-1]
         if last_message.tool_calls:
+            self.get_logger().info(f"Tool call requested: {last_message.tool_calls}")
             state["next_edge"] = "tools"
             return state
 
