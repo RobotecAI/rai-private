@@ -91,8 +91,13 @@ class RaiActionStore(RaiActionStoreInterface):
 
     def add_feedback(self, uid: str, feedback: Any):
         if uid not in self._feedbacks:
-            raise KeyError(f"Unknown action: {uid=}")
+            return  # TODO(boczekbartek): fix
         self._feedbacks[uid].append(feedback)
+
+    def clear(self):
+        self._actions.clear()
+        self._results.clear()
+        self._feedbacks.clear()
 
     def get_uids(self) -> List[str]:
         return list(self._actions.keys())
@@ -139,7 +144,10 @@ class RaiActionStore(RaiActionStoreInterface):
 
         return results
 
-    def get_feedbacks(self, uid: str) -> List[Any]:
+    def get_feedbacks(self, uid: Optional[str] = None) -> List[Any]:
+
+        if uid is None:
+            return self._feedbacks
         if uid not in self._feedbacks:
             raise KeyError(f"Unknown action: {uid=}")
         return self._feedbacks[uid]
@@ -161,13 +169,16 @@ class RosoutBuffer:
         llm = ChatOllama(model="llama3.1")
         self.llm = self.template | llm
 
+    def clear(self):
+        self._buffer.clear()
+
     def append(self, line: str):
         self._buffer.append(line)
         if len(self._buffer) > self.bufsize:
             self._buffer.popleft()
 
-    def get_raw_logs(self) -> str:
-        return "\n".join(self._buffer)
+    def get_raw_logs(self, last_n: int = 30) -> str:
+        return "\n".join(list(self._buffer)[-last_n:])
 
     def summarize(self):
         if len(self._buffer) == 0:
@@ -210,16 +221,28 @@ class RaiNode(Node):
             callback_group=self.callback_group,
             qos_profile=rclpy.qos.qos_profile_sensor_data,
         )
+        self.history = list()
 
     def task_callback(self, msg: std_msgs.msg.String):
         # task_dict = json.loads(msg.data)
         # task = Task(**task_dict)
         self.get_logger().info(f"Received task: {msg.data}")
-        run_task(self, msg.data)
+        self.get_logger().info(f"Current history has {len(self.history)} tasks")
+        if len(self.history) > 50:
+            new_hist = list()
+            new_hist.append(self.history[0])
+            new_hist.extend(self.history[-10:])
+            self.get_logger().info("Truncating history")
+            self.history = new_hist
+        run_task(self, msg.data, self.history)
+        self._actions_cache.clear()
+        self.rosout_buffer.clear()
         self.get_logger().info("Finished task")
         rclpy.spin(self)
 
     def rosout_callback(self, msg: rcl_interfaces.msg.Log):
+        if "rai_node" in msg.name:
+            return
         self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
 
     def log_summary_callback(self, request, response):
@@ -229,6 +252,9 @@ class RaiNode(Node):
         self.get_logger().info(f"Summary:\n{response.message}")
         return response
 
+    def summarize_logs(self):
+        return self.rosout_buffer.summarize()
+
     def get_actions_cache(self) -> RaiActionStoreInterface:
         return self._actions_cache
 
@@ -236,7 +262,7 @@ class RaiNode(Node):
         self.get_logger().info("Getting results")
         return self._actions_cache.get_results(uid)
 
-    def get_feedbacks(self, uid: str):
+    def get_feedbacks(self, uid: Optional[str] = None):
         self.get_logger().info("Getting feedbacks")
         return self._actions_cache.get_feedbacks(uid)
 
@@ -244,8 +270,7 @@ class RaiNode(Node):
         self.get_logger().info(f"Canceling action: {uid=}")
         return self._actions_cache.cancel_action(uid)
 
-    def get_running_actions(self, uid: str):
-        self.get_logger().info(f"Getting running actions: {uid=}")
+    def get_running_actions(self):
         return self._actions_cache.get_uids()
 
     def feedback_callback(self, uid: str, feedback_msg: Any):

@@ -55,7 +55,9 @@ class Ros2GetActionNamesAndTypesTool(Ros2BaseTool):
     def _run(self):
         output = [
             (topic_name, topic_type)
-            for topic_name, topic_type in get_action_names_and_types(self.node)  # type: ignore
+            for topic_name, topic_type in get_action_names_and_types(self.node)
+            if "assisted" not in topic_name.lower()  # type: ignore
+            # TODO(boczekbartek): remove 'assisted'
         ]
         return str(output)
 
@@ -128,7 +130,7 @@ class Ros2CheckActionResults(Ros2BaseTool):
 
     args_schema: Type[OptionalActionUidInput] = OptionalActionUidInput
 
-    def _run(self, uid: Optional[str]):
+    def _run(self, uid: Optional[str] = None):
         return str(self.node.get_results(uid))
 
 
@@ -146,7 +148,7 @@ class Ros2ListActionFeedbacks(Ros2BaseTool):
     name = "Ros2ListActionFeedbacks"
     description = "List intermediate feedbacks received during ros2 action. Feedbacks are sent before the action is completed."
 
-    args_schema: Type[ActionUidInput] = ActionUidInput
+    args_schema: Type[OptionalActionUidInput] = OptionalActionUidInput
 
-    def _run(self, uid: str):
+    def _run(self, uid: Optional[str] = None):
         return str(self.node.get_feedbacks(uid))
