@@ -16,10 +16,11 @@
 import base64
 import json
 import logging
+import time
 from abc import ABCMeta, abstractmethod
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Optional, TypedDict, cast
+from typing import Any, Deque, Dict, List, Literal, Optional, TypedDict, cast
 
 import cv2
 import rcl_interfaces.msg
@@ -30,17 +31,20 @@ import rclpy.qos
 import rclpy.task
 import sensor_msgs.msg
 import std_msgs.msg
-import std_srvs.srv
 from cv_bridge import CvBridge
+from langchain.tools import tool
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.graph import CompiledGraph
+from langgraph.prebuilt import ToolNode
 from rclpy.node import Node
 
-from rai.run_task import run_task
 from rai.scenario_engine.messages import HumanMultimodalMessage
+from rai.tools.ros.native import Ros2BaseTool
 
 
 class RaiActionStoreInterface(metaclass=ABCMeta):
@@ -203,13 +207,46 @@ class State(TypedDict):
     messages: List[BaseMessage]
     robot_state: BaseMessage
     current_task: str
-    cont: bool
+    next_edge: Optional[str]
+
+
+class TaskResolved(BaseModel):
+    resolved: bool = Field(..., description="Whether the task was resolved or not")
+
+
+@dataclass
+class RobotState:
+    last_image: Optional[sensor_msgs.msg.Image] = None
+
+
+@tool
+def wait_for_2s():
+    """Wait for 2 seconds"""
+    time.sleep(2)
+
+
+class GetCameraImageTool(Ros2BaseTool):
+    name = "get_camera_image"
+    description = "Get image from robots camera"
+
+    def _run(self):
+        if self.node.robot_state.last_image is None:
+            return "Image not available yet"
+        else:
+            return self.node.convert_ros_img_to_base64(self.node.robot_state.last_image)
+
+
+def get_camera_image(self):
+    """Get image from robot camera"""
 
 
 class RaiNode(Node):
     def __init__(self):
         super().__init__("rai_node")
         self._actions_cache = RaiActionStore()
+        self.robot_state = RobotState()
+        self.tools = [wait_for_2s, GetCameraImageTool(node=self)]
+
         # ---------- ROS Parameters ----------
         self.camera_topic = (
             "/camera/camera/color/image_raw"  # TODO(boczekbartek): parametrize
@@ -225,7 +262,7 @@ class RaiNode(Node):
         self.llm_workflow = self.initialize_llm_workflow()
 
         # ---------- LLM Agents ----------
-        self.big_llm = ChatOpenAI(model="gpt-4o")
+        self.big_llm = ChatOpenAI(model="gpt-4o").bind_tools(self.tools)
         self.small_llm = ChatOpenAI(model="gpt-4o-mini")
 
     def initialize_robot_state_interfaces(self):
@@ -240,7 +277,7 @@ class RaiNode(Node):
 
         self.camera_sub = self.create_subscription(
             sensor_msgs.msg.Image,
-            "/camera/image_raw",
+            self.camera_topic,
             callback=self.camera_image_callback,
             callback_group=self.callback_group,
             qos_profile=rclpy.qos.qos_profile_sensor_data,
@@ -255,11 +292,34 @@ class RaiNode(Node):
             qos_profile=self.qos_profile,
         )
 
-    def initialize_llm_workflow(self):
+    def initialize_llm_workflow(self) -> CompiledGraph:
         workflow = StateGraph(State)
+
+        # ---------- Nodes ----------
         workflow.add_node("get_robot_state", self.get_robot_state)
         workflow.add_node("reason", self.reason)
-        return workflow
+        workflow.add_node("should_continue", self.should_continue)
+        workflow.add_node("tools", ToolNode(self.tools))
+
+        # ----------  Edges ----------
+        workflow.add_edge(START, "get_robot_state")
+        workflow.add_edge("get_robot_state", "reason")
+        workflow.add_edge("reason", "should_continue")
+        workflow.add_edge("tools", "reason")
+        workflow.add_conditional_edges("should_continue", self.route)
+
+        return workflow.compile(debug=True)
+
+    def route(self, state: State) -> Literal["tools", "get_robot_state", END]:
+        if state["next_edge"] is None:
+            return END
+        elif state["next_edge"] == "get_robot_state":
+            return "get_robot_state"
+        elif state["next_edge"] == "tools":
+            return "tools"
+        else:
+            self.get_logger().info(f"Unknown edge: {state['next_edge']}")
+            return END
 
     # ---------- LLM Workflow Nodes ----------
     def reason(self, state: State) -> State:
@@ -268,13 +328,16 @@ class RaiNode(Node):
             + state["messages"]
             + [state["robot_state"]]
         )
-        llm = self.big_llm
-        msg = llm.invoke(input)
+        msg = self.big_llm.invoke(input)
         state["messages"].append(msg)
         return state
 
     def get_robot_state(self, state: State) -> State:
-        camera_img_summary = self.describe_image(self.robot_state.last_image)
+        last_image = self.robot_state.last_image
+        camera_img_summary = (
+            "No image yet" if last_image is None else self.describe_image(last_image)
+        )
+
         logs_summary = self.rosout_buffer.summarize()
 
         state["robot_state"] = HumanMessage(
@@ -284,19 +347,71 @@ class RaiNode(Node):
         )
         return state
 
+    def should_continue(self, state: State) -> State:
+        chat_history = state["messages"]
+
+        # Check if tool call requested
+        last_message = chat_history[-1]
+        if last_message.tool_calls:
+            state["next_edge"] = "tools"
+            return state
+
+        system_prompt = SystemMessage(
+            content="You are a critic. Your job is to determine if the task is completed."
+        )
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", "{system_prompt}"),
+                ("human", "The task to judge. {task}"),
+                ("human", "The chat history that you should judge upon"),
+                ("placeholder", "{chat_history}"),
+            ]
+        )
+        task = state["current_task"]
+        chain = prompt | self.small_llm.with_structured_output(TaskResolved)
+
+        task_resolved: TaskResolved = chain.invoke(
+            {"system_prompt": system_prompt, "task": task, "chat_history": chat_history}
+        )  # type: ignore
+
+        state["next_edge"] = None if task_resolved.resolved else "get_robot_state"
+        return state
+
     # ---------- ROS Callbacks ----------
+    def task_callback(self, msg: std_msgs.msg.String):
+        self.get_logger().info(f"Received task: {msg.data}")
+        payload = {
+            "current_task": msg.data,
+            "messages": [],
+            "robot_state": None,
+        }
+
+        self.llm_workflow.invoke(payload)
+
+        self.clear_state()
+        self.get_logger().info("Finished task")
+
     def camera_image_callback(self, msg: sensor_msgs.msg.Image):
-        pass
+        self.robot_state.last_image = msg
+
+    def rosout_callback(self, msg: rcl_interfaces.msg.Log):
+        if "rai_node" in msg.name:
+            return
+        self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
+
+    # ---------- LLM Tools ----------
 
     # ---------- LLM Utilities ----------
     def describe_image(self, msg: sensor_msgs.msg.Image) -> str:
         PROMPT = """Please describe the image in 2 sentences max 150 chars."""
         base64_image = self.convert_ros_img_to_base64(msg)
         llm_msg = HumanMultimodalMessage(content=PROMPT, images=[base64_image])
-        output = self.small_llm.invoke(llm_msg)
+        output = self.small_llm.invoke([llm_msg])
         return output.content
 
     # ---------- ROS Utilities ----------
+
     # ---------- Other Utilities ----------
     def convert_ros_img_to_base64(self, msg: sensor_msgs.msg.Image) -> str:
         bridge = CvBridge()
@@ -314,54 +429,37 @@ class RaiNode(Node):
         self._actions_cache.clear()
         self.rosout_buffer.clear()
 
-    def task_callback(self, msg: std_msgs.msg.String):
-        self.get_logger().info(f"Received task: {msg.data}")
-
-        self.workflow
-
-        run_task(self, msg.data, self.history)
-        self._actions_cache.clear()
-        self.rosout_buffer.clear()
-        self.get_logger().info("Finished task")
-        rclpy.spin(self)
-
-    def rosout_callback(self, msg: rcl_interfaces.msg.Log):
-        if "rai_node" in msg.name:
-            return
-        self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
-
-    def summarize_logs(self):
-        return self.rosout_buffer.summarize()
-
-    def get_actions_cache(self) -> RaiActionStoreInterface:
-        return self._actions_cache
-
-    def get_results(self, uid: Optional[str]):
-        self.get_logger().info("Getting results")
-        return self._actions_cache.get_results(uid)
-
-    def get_feedbacks(self, uid: Optional[str] = None):
-        self.get_logger().info("Getting feedbacks")
-        return self._actions_cache.get_feedbacks(uid)
-
-    def cancel_action(self, uid: str):
-        self.get_logger().info(f"Canceling action: {uid=}")
-        return self._actions_cache.cancel_action(uid)
-
-    def get_running_actions(self):
-        return self._actions_cache.get_uids()
-
-    def feedback_callback(self, uid: str, feedback_msg: Any):
-        feedback = feedback_msg.feedback
-        self.get_logger().debug(f"Received feedback: {feedback}")
-        self._actions_cache.add_feedback(uid, feedback)
-
-    def get_state(self):
-        self.get_logger().info("Getting state")
-        future = self.state_client.call_async(std_srvs.srv.Trigger.Request())
-        rclpy.spin_until_future_complete(self, future)
-        result: std_srvs.srv.Trigger.Response = future.result()
-        return result.message
+    #
+    # def get_actions_cache(self) -> RaiActionStoreInterface:
+    #     return self._actions_cache
+    #
+    # def get_results(self, uid: Optional[str]):
+    #     self.get_logger().info("Getting results")
+    #     return self._actions_cache.get_results(uid)
+    #
+    # def get_feedbacks(self, uid: Optional[str] = None):
+    #     self.get_logger().info("Getting feedbacks")
+    #     return self._actions_cache.get_feedbacks(uid)
+    #
+    # def cancel_action(self, uid: str):
+    #     self.get_logger().info(f"Canceling action: {uid=}")
+    #     return self._actions_cache.cancel_action(uid)
+    #
+    # def get_running_actions(self):
+    #     return self._actions_cache.get_uids()
+    #
+    # def feedback_callback(self, uid: str, feedback_msg: Any):
+    #     feedback = feedback_msg.feedback
+    #     self.get_logger().debug(f"Received feedback: {feedback}")
+    #     self._actions_cache.add_feedback(uid, feedback)
+    #
+    # def get_state(self):
+    #     self.get_logger().info("Getting state")
+    #     future = self.state_client.call_async(std_srvs.srv.Trigger.Request())
+    #     rclpy.spin_until_future_complete(self, future)
+    #     result: std_srvs.srv.Trigger.Response = future.result()
+    #     return result.message
+    #
 
 
 if __name__ == "__main__":
