@@ -13,23 +13,34 @@
 # limitations under the License.
 #
 
+import base64
+import json
 import logging
 from abc import ABCMeta, abstractmethod
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, TypedDict, cast
 
+import cv2
 import rcl_interfaces.msg
 import rclpy
 import rclpy.callback_groups
+import rclpy.executors
 import rclpy.qos
+import rclpy.task
+import sensor_msgs.msg
 import std_msgs.msg
 import std_srvs.srv
+from cv_bridge import CvBridge
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph
 from rclpy.node import Node
 
 from rai.run_task import run_task
+from rai.scenario_engine.messages import HumanMultimodalMessage
 
 
 class RaiActionStoreInterface(metaclass=ABCMeta):
@@ -40,7 +51,7 @@ class RaiActionStoreInterface(metaclass=ABCMeta):
         action_name: str,
         action_type: str,
         action_goal_args: Dict[str, Any],
-        result_future: rclpy.Future,
+        result_future: rclpy.task.Future,
     ):
         pass
 
@@ -63,7 +74,7 @@ class RaiActionStoreRecord:
     action_name: str
     action_type: str
     action_goal_args: Dict[str, Any]
-    result_future: rclpy.Future
+    result_future: rclpy.task.Future
 
 
 class RaiActionStore(RaiActionStoreInterface):
@@ -78,7 +89,7 @@ class RaiActionStore(RaiActionStoreInterface):
         action_name: str,
         action_type: str,
         action_goal_args: Dict[str, Any],
-        result_future: rclpy.Future,
+        result_future: rclpy.task.Future,
     ):
         self._actions[uid] = RaiActionStoreRecord(
             uid=uid,
@@ -188,18 +199,37 @@ class RosoutBuffer:
         return str(response.content)
 
 
+class State(TypedDict):
+    messages: List[BaseMessage]
+    robot_state: BaseMessage
+    current_task: str
+    cont: bool
+
+
 class RaiNode(Node):
     def __init__(self):
         super().__init__("rai_node")
-
-        self.callback_group = rclpy.callback_groups.ReentrantCallbackGroup()
         self._actions_cache = RaiActionStore()
-
-        self.rosout_buffer = RosoutBuffer()
-        self.state_client = self.create_client(
-            std_srvs.srv.Trigger, "/rai/state", callback_group=self.callback_group
+        # ---------- ROS Parameters ----------
+        self.camera_topic = (
+            "/camera/camera/color/image_raw"  # TODO(boczekbartek): parametrize
         )
+        self.task_topic = "/task_addition_requests"
 
+        # ---------- ROS configuration ----------
+        self.callback_group = rclpy.callback_groups.ReentrantCallbackGroup()
+        self.qos_profile = rclpy.qos.qos_profile_sensor_data
+
+        self.initialize_robot_state_interfaces()
+        self.initialize_task_subscriber()
+        self.llm_workflow = self.initialize_llm_workflow()
+
+        # ---------- LLM Agents ----------
+        self.big_llm = ChatOpenAI(model="gpt-4o")
+        self.small_llm = ChatOpenAI(model="gpt-4o-mini")
+
+    def initialize_robot_state_interfaces(self):
+        self.rosout_buffer = RosoutBuffer()
         self.rosout_sub = self.create_subscription(
             rcl_interfaces.msg.Log,
             "/rosout",
@@ -207,33 +237,88 @@ class RaiNode(Node):
             callback_group=self.callback_group,
             qos_profile=rclpy.qos.qos_profile_sensor_data,
         )
-        self.rosout_summary_service = self.create_service(
-            std_srvs.srv.Trigger,
-            "rai_rosout_summary_service",
-            self.log_summary_callback,
-            callback_group=self.callback_group,
-        )
 
-        self.task_sub = self.create_subscription(
-            std_msgs.msg.String,
-            "/task_addition_requests",
-            callback=self.task_callback,
+        self.camera_sub = self.create_subscription(
+            sensor_msgs.msg.Image,
+            "/camera/image_raw",
+            callback=self.camera_image_callback,
             callback_group=self.callback_group,
             qos_profile=rclpy.qos.qos_profile_sensor_data,
         )
-        self.history = list()
+
+    def initialize_task_subscriber(self):
+        self.task_sub = self.create_subscription(
+            std_msgs.msg.String,
+            self.task_topic,
+            callback=self.task_callback,
+            callback_group=self.callback_group,
+            qos_profile=self.qos_profile,
+        )
+
+    def initialize_llm_workflow(self):
+        workflow = StateGraph(State)
+        workflow.add_node("get_robot_state", self.get_robot_state)
+        workflow.add_node("reason", self.reason)
+        return workflow
+
+    # ---------- LLM Workflow Nodes ----------
+    def reason(self, state: State) -> State:
+        input = (
+            [SystemMessage(content=state["current_task"])]
+            + state["messages"]
+            + [state["robot_state"]]
+        )
+        llm = self.big_llm
+        msg = llm.invoke(input)
+        state["messages"].append(msg)
+        return state
+
+    def get_robot_state(self, state: State) -> State:
+        camera_img_summary = self.describe_image(self.robot_state.last_image)
+        logs_summary = self.rosout_buffer.summarize()
+
+        state["robot_state"] = HumanMessage(
+            json.dumps(
+                {"camera_img_summary": camera_img_summary, "logs_summary": logs_summary}
+            )
+        )
+        return state
+
+    # ---------- ROS Callbacks ----------
+    def camera_image_callback(self, msg: sensor_msgs.msg.Image):
+        pass
+
+    # ---------- LLM Utilities ----------
+    def describe_image(self, msg: sensor_msgs.msg.Image) -> str:
+        PROMPT = """Please describe the image in 2 sentences max 150 chars."""
+        base64_image = self.convert_ros_img_to_base64(msg)
+        llm_msg = HumanMultimodalMessage(content=PROMPT, images=[base64_image])
+        output = self.small_llm.invoke(llm_msg)
+        return output.content
+
+    # ---------- ROS Utilities ----------
+    # ---------- Other Utilities ----------
+    def convert_ros_img_to_base64(self, msg: sensor_msgs.msg.Image) -> str:
+        bridge = CvBridge()
+        cv_image = cast(cv2.Mat, bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough"))  # type: ignore
+        if cv_image.shape[-1] == 4:
+            cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGRA2RGB)
+            return base64.b64encode(bytes(cv2.imencode(".png", cv_image)[1])).decode(
+                "utf-8"
+            )
+        else:
+            image_data = cv2.imencode(".png", cv_image)[1].tostring()  # type: ignore
+            return base64.b64encode(image_data).decode("utf-8")  # type: ignore
+
+    def clear_state(self):
+        self._actions_cache.clear()
+        self.rosout_buffer.clear()
 
     def task_callback(self, msg: std_msgs.msg.String):
-        # task_dict = json.loads(msg.data)
-        # task = Task(**task_dict)
         self.get_logger().info(f"Received task: {msg.data}")
-        self.get_logger().info(f"Current history has {len(self.history)} tasks")
-        if len(self.history) > 50:
-            new_hist = list()
-            new_hist.append(self.history[0])
-            new_hist.extend(self.history[-10:])
-            self.get_logger().info("Truncating history")
-            self.history = new_hist
+
+        self.workflow
+
         run_task(self, msg.data, self.history)
         self._actions_cache.clear()
         self.rosout_buffer.clear()
@@ -244,13 +329,6 @@ class RaiNode(Node):
         if "rai_node" in msg.name:
             return
         self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
-
-    def log_summary_callback(self, request, response):
-        response.success = True
-        self.get_logger().info(f"Raw log\n{self.rosout_buffer.get_raw_logs()}")
-        response.message = self.rosout_buffer.summarize()
-        self.get_logger().info(f"Summary:\n{response.message}")
-        return response
 
     def summarize_logs(self):
         return self.rosout_buffer.summarize()
@@ -288,6 +366,9 @@ class RaiNode(Node):
 
 if __name__ == "__main__":
     rclpy.init()
+
     node = RaiNode()
-    rclpy.spin(node)
+    executor = rclpy.executors.MultiThreadedExecutor()
+    executor.add_node(node)
+    executor.spin()
     rclpy.shutdown()
