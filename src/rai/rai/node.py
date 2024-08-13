@@ -37,7 +37,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
-from rclpy.action import get_action_names_and_types
+from rclpy.action.graph import get_action_names_and_types
 from rclpy.node import Node
 from rclpy.wait_for_message import wait_for_message
 from std_srvs.srv import Trigger
@@ -48,6 +48,13 @@ from rai.tools.ros.native import (
     GetCameraImage,
     GetMsgFromTopic,
     Ros2GetTopicsNamesAndTypesTool,
+)
+from rai.tools.ros.native_actions import (
+    Ros2ActionRunner,
+    Ros2CancelAction,
+    Ros2CheckActionResults,
+    Ros2GetActionNamesAndTypesTool,
+    Ros2GetRegisteredActions,
 )
 from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
 
@@ -219,6 +226,28 @@ class NodeDiscovery:
     topics_and_types: Dict[str, str] = field(default_factory=dict)
     services_and_types: Dict[str, str] = field(default_factory=dict)
     actions_and_types: Dict[str, str] = field(default_factory=dict)
+    whitelist: Optional[List[str]] = field(default_factory=list)
+
+    def set(self, topics, services, actions):
+        self.topics_and_types = self.to_dict(topics)
+        self.services_and_types = self.to_dict(services)
+        self.actions_and_types = self.to_dict(actions)
+        if self.whitelist is not None:
+            self.__filter(self.whitelist)
+
+    def __filter(self, whitelist: List[str]):
+        for d in [
+            self.topics_and_types,
+            self.services_and_types,
+            self.actions_and_types,
+        ]:
+            to_remove = [k for k in d if k not in whitelist]
+            for k in to_remove:
+                d.pop(k)
+
+    @staticmethod
+    def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
+        return {k: v[0] for k, v in info}
 
 
 class RaiBaseNode(Node):
@@ -227,11 +256,13 @@ class RaiBaseNode(Node):
         node_name: str,
         observe_topics: Optional[List[str]] = None,
         observe_postprocessors: Optional[List[Callable]] = None,
+        whitelist: Optional[List[str]] = None,
         *args,
         **kwargs,
     ):
         super().__init__(node_name, *args, **kwargs)
 
+        self.whitelist = whitelist
         self.robot_state = dict()
         self.state_topics = observe_topics if observe_topics is not None else []
         self.state_postprocessors = (
@@ -255,7 +286,7 @@ class RaiBaseNode(Node):
             self.discovery,
             callback_group=self.callback_group,
         )
-        self.ros_discovery_info = NodeDiscovery()
+        self.ros_discovery_info = NodeDiscovery(whitelist=self.whitelist)
         self.discovery()
 
         self.qos_profile = rclpy.qos.qos_profile_sensor_data
@@ -305,17 +336,10 @@ class RaiBaseNode(Node):
         return system_prompt
 
     def discovery(self):
-        def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
-            return {k: v[0] for k, v in info}
-
-        self.ros_discovery_info.topics_and_types = to_dict(
-            self.get_topic_names_and_types()
-        )
-        self.ros_discovery_info.actions_and_types = to_dict(
-            get_action_names_and_types(self)
-        )
-        self.ros_discovery_info.services_and_types = to_dict(
-            self.get_service_names_and_types()
+        self.ros_discovery_info.set(
+            self.get_topic_names_and_types(),
+            self.get_service_names_and_types(),
+            get_action_names_and_types(self),
         )
 
     def get_raw_message_from_topic(self, topic: str, timeout_sec: int = 1) -> Any:
@@ -380,7 +404,8 @@ class RaiBaseNode(Node):
 
 
 class RaiNode(RaiBaseNode):
-    def __init__(self, observe_topics=None, observe_postprocessors=None):
+    def __init__(self, observe_topics=None, observe_postprocessors=None,
+                 ):
         super().__init__(
             "rai_node",
             observe_topics=observe_topics,
@@ -507,15 +532,46 @@ if __name__ == "__main__":
     ]
 
     observe_postprocessors = {"/camera/camera/color/image_raw": describe_ros_image}
+    topics_whitelist = [
+        "/rosout",
+        "/camera/camera/color/image_raw",
+        "/map",
+        "/scan",
+        "/diagnostics",
+    ]
+
+    actions_whitelist = [
+        "/backup",
+        "/compute_path_through_poses",
+        "/compute_path_to_pose",
+        "/dock_robot",
+        "/drive_on_heading",
+        "/follow_gps_waypoints",
+        "/follow_path",
+        "/follow_waypoints",
+        "/navigate_through_poses",
+        "/navigate_to_pose",
+        "/smooth_path",
+        "/spin",
+        "/undock_robot",
+        "/wait",
+    ]
 
     node = RaiNode(
-        observe_topics=observe_topics, observe_postprocessors=observe_postprocessors
+        observe_topics=observe_topics,
+        observe_postprocessors=observe_postprocessors,
+        whitelist=topics_whitelist + actions_whitelist,
     )
 
     tools = [
         wait_for_2s,
         GetMsgFromTopic(node=node),
         Ros2GetTopicsNamesAndTypesTool(node=node),
+        Ros2GetActionNamesAndTypesTool(node=node),
+        Ros2GetRegisteredActions(node=node),
+        Ros2CheckActionResults(node=node),
+        Ros2CancelAction(node=node),
+        Ros2ActionRunner(node=node),
         GetCameraImage(node=node),
     ]
 
