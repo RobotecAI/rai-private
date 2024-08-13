@@ -83,7 +83,11 @@ class Ros2ActionRunner(Ros2BaseTool):
     def _run(
         self, action_name: str, action_type: str, action_goal_args: Dict[str, Any]
     ):
-        goal_msg, msg_cls = self._build_msg(action_type, action_goal_args)
+        try:
+            goal_msg, msg_cls = self._build_msg(action_type, action_goal_args)
+        except Exception as e:
+            return f"Failed to build message: {e}"
+
         client = ActionClient(
             self.node, msg_cls, action_name, callback_group=self.node.callback_group
         )
