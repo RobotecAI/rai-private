@@ -75,6 +75,9 @@ class Report(BaseModel):
     steps: List[str] = Field(
         ..., title="Steps", description="The steps taken to solve the problem"
     )
+    response_to_user: str = Field(
+        ..., title="Response", description="The response to the user"
+    )
 
 
 class ToolRunner(RunnableCallable):
@@ -207,7 +210,7 @@ def reporter(llm: BaseChatModel, logger: loggers_type, state: State):
     logger.info("Summarizing the conversation")
     prompt = (
         "You are the reporter. Your task is to summarize what happened previously. "
-        "Make sure to mention the problem, solution and the outcome."
+        "Make sure to mention the problem, solution and the outcome. Prepare clear response to the user."
     )
     ai_msg = llm.with_structured_output(Report).invoke(
         [SystemMessage(content=prompt)] + state["messages"]
