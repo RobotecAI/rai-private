@@ -28,7 +28,6 @@ from nav_msgs.msg import OccupancyGrid
 from tf_transformations import euler_from_quaternion
 
 from rai.communication.ros_communication import (
-    SingleImageGrabber,
     SingleMessageGrabber,
     TF2TransformFetcher,
 )
@@ -279,25 +278,3 @@ class GetCurrentPositionTool(BaseTool):
                 }
             ),
         }
-
-
-class GetCameraImageToolInput(BaseModel):
-    """Input for the get_current_image tool."""
-
-    topic: str = Field(..., description="Ros2 image topic to subscribe to")
-
-
-class GetCameraImageTool(BaseTool):
-    """Get the current image"""
-
-    name = "GetCameraImageTool"
-    description: str = "A tool for getting the current image from a ROS2 topic."
-    response_format: str = "content_and_artifact"
-
-    args_schema: Type[GetCameraImageToolInput] = GetCameraImageToolInput
-
-    def _run(self, topic: str):
-        """Gets the current image from the specified topic."""
-        grabber = SingleImageGrabber(topic, timeout_sec=10)
-        base64_image = grabber.get_data()
-        return "Image grabbed successfully", {"images": [base64_image]}

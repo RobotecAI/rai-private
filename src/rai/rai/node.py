@@ -13,7 +13,6 @@
 # limitations under the License.
 #
 
-import base64
 import functools
 import logging
 import time
@@ -21,9 +20,8 @@ from abc import ABCMeta, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from pprint import pformat
-from typing import Any, Deque, Dict, List, Literal, Optional, Tuple, Type, cast
+from typing import Any, Callable, Deque, Dict, List, Literal, Optional, Tuple
 
-import cv2
 import rcl_interfaces.msg
 import rclpy
 import rclpy.callback_groups
@@ -33,11 +31,9 @@ import rclpy.subscription
 import rclpy.task
 import sensor_msgs.msg
 import std_msgs.msg
-from cv_bridge import CvBridge
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
@@ -49,11 +45,11 @@ from std_srvs.srv import Trigger
 from rai.agents.state_based import State, create_state_based_agent
 from rai.scenario_engine.messages import HumanMultimodalMessage
 from rai.tools.ros.native import (
-    Ros2BaseInput,
-    Ros2BaseTool,
+    GetCameraImage,
+    GetMsgFromTopic,
     Ros2GetTopicsNamesAndTypesTool,
 )
-from rai.tools.ros.utils import import_message_from_str
+from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
 
 
 class RaiActionStoreInterface(metaclass=ABCMeta):
@@ -212,59 +208,10 @@ class RosoutBuffer:
         return str(response.content)
 
 
-class TaskResolved(BaseModel):
-    resolved: bool = Field(..., description="Whether the task was resolved or not")
-
-
 @tool
 def wait_for_2s():
     """Wait for 2 seconds"""
     time.sleep(2)
-
-
-class TopicInput(Ros2BaseInput):
-    topic_name: str = Field(..., description="Ros2 topic name")
-
-
-def convert_ros_img_to_base64(msg: sensor_msgs.msg.Image) -> str:
-    bridge = CvBridge()
-    cv_image = cast(cv2.Mat, bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough"))  # type: ignore
-    if cv_image.shape[-1] == 4:
-        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGRA2RGB)
-        return base64.b64encode(bytes(cv2.imencode(".png", cv_image)[1])).decode(
-            "utf-8"
-        )
-    else:
-        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-        image_data = cv2.imencode(".png", cv_image)[1].tostring()  # type: ignore
-        return base64.b64encode(image_data).decode("utf-8")  # type: ignore
-
-
-class GetMsgFromTopic(Ros2BaseTool):
-    name = "get_msg_from_topic"
-    description: str = "Get message from topic"
-    args_schema: Type[TopicInput] = TopicInput
-    response_format: str = "content_and_artifact"
-
-    def _run(self, topic_name: str):
-        msg = node.get_raw_message_from_topic(topic_name)
-        if type(msg) is sensor_msgs.msg.Image:
-            img = convert_ros_img_to_base64(msg)
-            return "Got image", {"images": [img]}
-        else:
-            return str(msg), {}
-
-
-class GetCameraImage(Ros2BaseTool):
-    name = "get_camera_image"
-    description: str = "get image from robots camera"
-    response_format: str = "content_and_artifact"
-
-    def _run(self):
-        topic_name = "/camera/camera/color/image_raw"
-        msg = node.get_raw_message_from_topic(topic_name)
-        img = convert_ros_img_to_base64(msg)
-        return "Got image", {"images": [img]}
 
 
 @dataclass
@@ -274,13 +221,22 @@ class NodeDiscovery:
     actions_and_types: Dict[str, str] = field(default_factory=dict)
 
 
-class RaiNode(Node):
-    def __init__(self, observe_topics, observe_postprocessors):
-        super().__init__("rai_node")
-        self._actions_cache = RaiActionStore()
+class RaiBaseNode(Node):
+    def __init__(
+        self,
+        node_name: str,
+        observe_topics: Optional[List[str]] = None,
+        observe_postprocessors: Optional[List[Callable]] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(node_name, *args, **kwargs)
+
         self.robot_state = dict()
-        self.state_topics = observe_topics
-        self.state_postprocessors = observe_postprocessors
+        self.state_topics = observe_topics if observe_topics is not None else []
+        self.state_postprocessors = (
+            observe_postprocessors if observe_postprocessors is not None else []
+        )
 
         self.constitution_service = self.create_client(
             Trigger,
@@ -290,30 +246,24 @@ class RaiNode(Node):
             Trigger, "rai_whoami_identity_service"
         )
 
-        # ---------- ROS Parameters ----------
-        self.task_topic = "/task_addition_requests"
-
-        # ---------- ROS configuration ----------
-        self.ros_discovery_info = NodeDiscovery()
-        self.callback_group = rclpy.callback_groups.ReentrantCallbackGroup()
-        self.qos_profile = rclpy.qos.qos_profile_sensor_data
         self.DISCOVERY_FREQ = 0.5
         self.DISCOVERY_DEPTH = 5
+
+        self.callback_group = rclpy.callback_groups.ReentrantCallbackGroup()
         self.timer = self.create_timer(
             self.DISCOVERY_FREQ,
             self.discovery,
             callback_group=self.callback_group,
         )
+        self.ros_discovery_info = NodeDiscovery()
         self.discovery()
+
+        self.qos_profile = rclpy.qos.qos_profile_sensor_data
 
         self.state_subscribers = dict()
         self.initialize_robot_state_interfaces(self.state_topics)
-        self.initialize_task_subscriber()
-        self.system_prompt = self.initialize_system_prompt()
 
-        # ---------- LLM Agents ----------
-        self.AGENT_RECURSION_LIMIT = 100
-        self.llm_app: CompiledGraph = None
+        self.system_prompt = self.initialize_system_prompt()
 
     def initialize_system_prompt(self):
         while not self.constitution_service.wait_for_service(timeout_sec=1.0):
@@ -347,13 +297,12 @@ class RaiNode(Node):
         Assume the conversation is carried over a voice interface, so try not to overwhelm the user.
         If you have multiple questions, please ask them one by one allowing user to respond before
         moving forward to the next question. Keep the conversation short and to the point.
+        Always reply in first person. When you use the tool and get the output, always present it in first person.
+        Do not ever guess the topic name. If you don't know the topic, use the available tools to find it.
         """
 
         self.get_logger().info(f"System prompt initialized: {system_prompt}")
         return system_prompt
-
-    def set_app(self, app: CompiledGraph):
-        self.llm_app = app
 
     def discovery(self):
         def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
@@ -368,24 +317,6 @@ class RaiNode(Node):
         self.ros_discovery_info.services_and_types = to_dict(
             self.get_service_names_and_types()
         )
-
-    def get_msg_type(self, topic: str, n_tries: int = 10) -> Any:
-        """Sometimes node fails to do full discovery, therefore we need to retry"""
-        for _ in range(n_tries):
-            if topic in self.ros_discovery_info.topics_and_types:
-                msg_type = self.ros_discovery_info.topics_and_types[topic]
-                return import_message_from_str(msg_type)
-            else:
-                self.get_logger().info(f"Waiting for topic: {topic}")
-                self.discovery()
-                time.sleep(self.DISCOVERY_FREQ)
-        raise KeyError(f"Topic {topic} not found")
-
-    def get_srv_type(self, service: str) -> Any:
-        pass
-
-    def get_action_type(self, action: str) -> Any:
-        pass
 
     def get_raw_message_from_topic(self, topic: str, timeout_sec: int = 1) -> Any:
         self.get_logger().info(f"Getting msg from topic: {topic}")
@@ -414,15 +345,23 @@ class RaiNode(Node):
                 self.get_logger().error(error)
                 return error
 
+    def get_msg_type(self, topic: str, n_tries: int = 10) -> Any:
+        """Sometimes node fails to do full discovery, therefore we need to retry"""
+        for _ in range(n_tries):
+            if topic in self.ros_discovery_info.topics_and_types:
+                msg_type = self.ros_discovery_info.topics_and_types[topic]
+                return import_message_from_str(msg_type)
+            else:
+                self.get_logger().info(f"Waiting for topic: {topic}")
+                self.discovery()
+                time.sleep(self.DISCOVERY_FREQ)
+        raise KeyError(f"Topic {topic} not found")
+
+    def generic_state_subscriber_callback(self, topic_name: str, msg: Any):
+        self.robot_state[topic_name] = msg
+
     def initialize_robot_state_interfaces(self, topics):
         self.rosout_buffer = RosoutBuffer()
-        self.rosout_sub = self.create_subscription(
-            rcl_interfaces.msg.Log,
-            "/rosout",
-            callback=self.rosout_callback,
-            callback_group=self.callback_group,
-            qos_profile=self.qos_profile,
-        )
 
         for topic in topics:
             msg_type = self.get_msg_type(topic)
@@ -438,6 +377,37 @@ class RaiNode(Node):
             )
 
             self.state_subscribers[topic] = subscriber
+
+
+class RaiNode(RaiBaseNode):
+    def __init__(self, observe_topics=None, observe_postprocessors=None):
+        super().__init__(
+            "rai_node",
+            observe_topics=observe_topics,
+            observe_postprocessors=observe_postprocessors,
+        )
+        self._actions_cache = RaiActionStore()
+
+        # ---------- ROS Parameters ----------
+        self.task_topic = "/task_addition_requests"
+
+        # ---------- ROS configuration ----------
+
+        self.initialize_task_subscriber()
+        self.rosout_sub = self.create_subscription(
+            rcl_interfaces.msg.Log,
+            "/rosout",
+            callback=self.rosout_callback,
+            callback_group=self.callback_group,
+            qos_profile=self.qos_profile,
+        )
+
+        # ---------- LLM Agents ----------
+        self.AGENT_RECURSION_LIMIT = 100
+        self.llm_app: CompiledGraph = None
+
+    def set_app(self, app: CompiledGraph):
+        self.llm_app = app
 
     def initialize_task_subscriber(self):
         self.task_sub = self.create_subscription(
@@ -487,9 +457,6 @@ class RaiNode(Node):
     def clear_state(self):
         self._actions_cache.clear()
         self.rosout_buffer.clear()
-
-    def generic_state_subscriber_callback(self, topic_name: str, msg: Any):
-        self.robot_state[topic_name] = msg
 
     def rosout_callback(self, msg: rcl_interfaces.msg.Log):
         if "rai_node" in msg.name:

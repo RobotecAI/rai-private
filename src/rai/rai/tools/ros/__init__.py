@@ -27,7 +27,6 @@ from .mock_tools import (
 )
 from .tools import (
     AddDescribedWaypointToDatabaseTool,
-    GetCameraImageTool,
     GetCurrentPositionTool,
     GetOccupancyGridTool,
 )
@@ -45,6 +44,5 @@ __all__ = [
     "Ros2ServiceTool",
     "AddDescribedWaypointToDatabaseTool",
     "GetOccupancyGridTool",
-    "GetCameraImageTool",
     "GetCurrentPositionTool",
 ]

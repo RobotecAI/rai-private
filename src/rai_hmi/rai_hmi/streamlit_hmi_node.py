@@ -15,6 +15,7 @@
 
 import base64
 import sys
+from threading import Thread
 
 import rclpy
 import streamlit as st
@@ -26,14 +27,11 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai.chat_models import ChatOpenAI
-from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.node import Node
 from std_msgs.msg import String
-from std_srvs.srv import Trigger
 
+from rai.node import RaiBaseNode
 from rai.scenario_engine.messages import HumanMultimodalMessage, ToolMultimodalMessage
-from rai.tools.ros.native import Ros2GetTopicsNamesAndTypesTool
-from rai.tools.ros.tools import GetCameraImageTool
+from rai.tools.ros.native import GetCameraImage, Ros2GetTopicsNamesAndTypesTool
 from rai_hmi.agent import State as ConversationState
 from rai_hmi.agent import create_conversational_agent
 from rai_hmi.custom_mavigator import RaiNavigator
@@ -54,88 +52,40 @@ if "memory" not in st.session_state:
     )
 
 
+class HMINode(RaiBaseNode):
+    def __init__(self, robot_description_package: str):
+        super().__init__("rai_hmi_node")
+        self.robot_description_package = robot_description_package
+        self.status_publisher = self.create_publisher(String, "hmi_status", 10)  # type: ignore self.task_addition_request_publisher = self.create_publisher(
+            String, "task_addition_requests", 10
+        )
+
+        self.documentation_service = self.create_client(
+            VectorStoreRetrieval,
+            "rai_whoami_documentation_service",
+            callback_group=self.callback_group,
+        )
+        self.faiss_index = self.load_documentation()
+
+    def load_documentation(self) -> FAISS:
+        faiss_index = FAISS.load_local(
+            get_package_share_directory(self.robot_description_package)
+            + "/description",
+            OpenAIEmbeddings(),
+            allow_dangerous_deserialization=True,
+        )
+        return faiss_index
+
+
 @st.cache_resource
 def initialize_ros(robot_description_package: str):
 
     rclpy.init()
 
-    class HMINode(Node):
-        def __init__(self, robot_description_package: str):
-            super().__init__("rai_hmi_node")
-            self.callback_group = ReentrantCallbackGroup()
-            self.robot_description_package = robot_description_package
-            self.status_publisher = self.create_publisher(String, "hmi_status", 10)  # type: ignore
-            self.task_addition_request_publisher = self.create_publisher(
-                String, "task_addition_requests", 10
-            )
-
-            self.documentation_service = self.create_client(
-                VectorStoreRetrieval,
-                "rai_whoami_documentation_service",
-                callback_group=self.callback_group,
-            )
-            self.constitution_service = self.create_client(
-                Trigger,
-                "rai_whoami_constitution_service",
-            )
-            self.identity_service = self.create_client(
-                Trigger, "rai_whoami_identity_service"
-            )
-
-        def initialize_system_prompt(self):
-            while not self.constitution_service.wait_for_service(timeout_sec=1.0):
-                self.get_logger().info(
-                    "Constitution service not available, waiting again..."
-                )
-
-            while not self.identity_service.wait_for_service(timeout_sec=1.0):
-                self.get_logger().info(
-                    "Identity service not available, waiting again..."
-                )
-
-            constitution_request = Trigger.Request()
-
-            constitution_future = self.constitution_service.call_async(
-                constitution_request
-            )
-            rclpy.spin_until_future_complete(self, constitution_future)
-            constitution_response = constitution_future.result()
-
-            identity_request = Trigger.Request()
-
-            identity_future = self.identity_service.call_async(identity_request)
-            rclpy.spin_until_future_complete(self, identity_future)
-            identity_response = identity_future.result()
-
-            system_prompt = f"""
-            Constitution:
-            {constitution_response.message}
-
-            Identity:
-            {identity_response.message}
-
-            You are a helpful assistant. You converse with users.
-            Assume the conversation is carried over a voice interface, so try not to overwhelm the user.
-            If you have multiple questions, please ask them one by one allowing user to respond before
-            moving forward to the next question. Keep the conversation short and to the point.
-            Always reply in first person. When you use the tool and get the output, always present it in first person.
-            Do not ever guess the topic name. If you don't know the topic, use the available tools to find it.
-            """
-
-            self.get_logger().info(f"System prompt initialized: {system_prompt}")
-            return system_prompt
-
-        def load_documentation(self) -> FAISS:
-            faiss_index = FAISS.load_local(
-                get_package_share_directory(self.robot_description_package)
-                + "/description",
-                OpenAIEmbeddings(),
-                allow_dangerous_deserialization=True,
-            )
-            return faiss_index
-
     if package_name is not None:
         hmi_node = HMINode(robot_description_package=robot_description_package)
+        thread = Thread(target=rclpy.spin, args=(hmi_node,), daemon=True)
+        thread.start()
         system_prompt = hmi_node.initialize_system_prompt()
         faiss_index = hmi_node.load_documentation()
         return hmi_node, system_prompt, faiss_index
@@ -189,10 +139,10 @@ def search_database(query: str) -> str:
 
 
 @st.cache_resource
-def initialize_genAI(system_prompt: str, _node: Node):
+def initialize_genAI(_node: HMINode):
     tools = [
         Ros2GetTopicsNamesAndTypesTool(node=_node),
-        GetCameraImageTool(),
+        GetCameraImage(node=_node),
     ]
     if package_name:
         tools.append(add_task_to_queue)
@@ -201,16 +151,16 @@ def initialize_genAI(system_prompt: str, _node: Node):
         tools.append(drive_forward)
 
     agent = create_conversational_agent(
-        llm, tools, debug=True, system_prompt=system_prompt
+        llm, tools, debug=True, system_prompt=_node.system_prompt
     )
 
     state = ConversationState(messages=[])
     return agent, state
 
 
-hmi_node, system_prompt, faiss_index = initialize_ros(package_name)
-agent_executor, state = initialize_genAI(system_prompt=system_prompt, _node=hmi_node)
-
+hmi_node = initialize_ros(sys.argv[1])
+faiss_index = hmi_node.faiss_index
+agent_executor, state = initialize_genAI(_node=hmi_node)
 
 st.subheader("Chat")
 

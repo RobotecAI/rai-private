@@ -21,7 +21,7 @@ import rclpy
 import rosidl_runtime_py.set_message
 import rosidl_runtime_py.utilities
 from langchain_core.pydantic_v1 import BaseModel, Field
-from rclpy.action import ActionClient, get_action_names_and_types
+from rclpy.action import ActionClient
 from rclpy.action.client import ClientGoalHandle
 
 from .native import Ros2BaseTool
@@ -53,13 +53,7 @@ class Ros2GetActionNamesAndTypesTool(Ros2BaseTool):
     description: str = "A tool for getting all ros2 actions names and types"
 
     def _run(self):
-        output = [
-            (topic_name, topic_type)
-            for topic_name, topic_type in get_action_names_and_types(self.node)
-            if "assisted" not in topic_name.lower()  # type: ignore
-            # TODO(boczekbartek): remove 'assisted'
-        ]
-        return str(output)
+        return self.node.ros_discovery_info.actions_and_types
 
 
 class Ros2ActionRunner(Ros2BaseTool):
@@ -117,16 +111,16 @@ class Ros2ActionRunner(Ros2BaseTool):
 
 
 class Ros2GetRegisteredActions(Ros2BaseTool):
-    name = "Ros2GetRegisteredAction"
-    description = "A tool for checking the results of submitted ros2 actions"
+    name: str = "Ros2GetRegisteredAction"
+    description: str = "A tool for checking the results of submitted ros2 actions"
 
     def _run(self):
         return str(self.node.get_running_actions())
 
 
 class Ros2CheckActionResults(Ros2BaseTool):
-    name = "Ros2CheckActionResults"
-    description = "A tool for checking the results of submitted ros2 actions"
+    name: str = "Ros2CheckActionResults"
+    description: str = "A tool for checking the results of submitted ros2 actions"
 
     args_schema: Type[OptionalActionUidInput] = OptionalActionUidInput
 
@@ -135,8 +129,8 @@ class Ros2CheckActionResults(Ros2BaseTool):
 
 
 class Ros2CancelAction(Ros2BaseTool):
-    name = "Ros2CancelAction"
-    description = "Cancel submitted action"
+    name: str = "Ros2CancelAction"
+    description: str = "Cancel submitted action"
 
     args_schema: Type[ActionUidInput] = ActionUidInput
 

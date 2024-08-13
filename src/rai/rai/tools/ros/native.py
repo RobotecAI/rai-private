@@ -17,17 +17,20 @@ import json
 from typing import Any, Dict, OrderedDict, Tuple, Type
 
 import rclpy
+import rclpy.callback_groups
+import rclpy.executors
 import rclpy.node
+import rclpy.qos
+import rclpy.subscription
+import rclpy.task
 import rosidl_runtime_py.set_message
 import rosidl_runtime_py.utilities
+import sensor_msgs.msg
 from langchain.tools import BaseTool
 from langchain_core.pydantic_v1 import BaseModel, Field
 from rclpy.impl.rcutils_logger import RcutilsLogger
-from rclpy.node import Node
 
-from rai.communication.ros_communication import wait_for_message
-
-from .utils import import_message_from_str
+from .utils import convert_ros_img_to_base64, import_message_from_str
 
 
 # --------------------- Inputs ---------------------
@@ -79,10 +82,7 @@ class Ros2GetTopicsNamesAndTypesTool(Ros2BaseTool):
     description: str = "A tool for getting all ros2 topics names and types"
 
     def _run(self):
-        return [
-            (topic_name, topic_type)
-            for topic_name, topic_type in self.node.get_topic_names_and_types()
-        ]
+        return self.node.ros_discovery_info.topics_and_types
 
 
 class Ros2ShowMsgInterfaceTool(BaseTool):
@@ -120,44 +120,6 @@ class Ros2ShowMsgInterfaceTool(BaseTool):
             return json.dumps(
                 {"goal": goal_dict, "result": result_dict, "feedback": feedback_dict}
             )
-
-
-class Ros2GetOneMsgFromTopicTool(Ros2BaseTool):
-    name: str = "Ros2GetOneMsgFromTopic"
-    description: str = "A tool for getting one message from a ros2 topic"
-
-    args_schema: Type[Ros2GetOneMsgFromTopicInput] = Ros2GetOneMsgFromTopicInput
-
-    def _run(self, topic: str, msg_type: str, timeout_sec: int):
-        """Gets the current position from the specified topic."""
-        msg_cls: Type = import_message_from_str(msg_type)
-
-        qos_profile = (
-            rclpy.qos.qos_profile_sensor_data
-        )  # TODO(@boczekbartek): infer QoS from topic
-
-        success, msg = wait_for_message(
-            msg_cls,
-            self.node,
-            topic,
-            qos_profile=qos_profile,
-            time_to_wait=timeout_sec,
-        )
-        msg = msg.get_data()
-
-        if success:
-            self.logger.info(f"Received message of type {msg_type} from topic {topic}")
-        else:
-            self.logger.error(
-                f"Failed to receive message of type {msg_type} from topic {topic}"
-            )
-
-        if msg is None:
-            return {"content": "No message received."}
-
-        return {
-            "content": str(msg),
-        }
 
 
 class Ros2PubMessageTool(Ros2BaseTool):
@@ -200,3 +162,34 @@ class Ros2PubMessageTool(Ros2BaseTool):
 
         msg.header.stamp = self.node.get_clock().now().to_msg()
         publisher.publish(msg)
+
+
+class TopicInput(Ros2BaseInput):
+    topic_name: str = Field(..., description="Ros2 topic name")
+
+
+class GetMsgFromTopic(Ros2BaseTool):
+    name = "get_msg_from_topic"
+    description: str = "Get message from topic"
+    args_schema: Type[TopicInput] = TopicInput
+    response_format: str = "content_and_artifact"
+
+    def _run(self, topic_name: str):
+        msg = self.node.get_raw_message_from_topic(topic_name)
+        if type(msg) is sensor_msgs.msg.Image:
+            img = convert_ros_img_to_base64(msg)
+            return "Got image", {"images": [img]}
+        else:
+            return str(msg), {}
+
+
+class GetCameraImage(Ros2BaseTool):
+    name = "get_camera_image"
+    description: str = "get image from robots camera"
+    response_format: str = "content_and_artifact"
+    args_schema: Type[TopicInput] = TopicInput
+
+    def _run(self, topic_name: str):
+        msg = self.node.get_raw_message_from_topic(topic_name)
+        img = convert_ros_img_to_base64(msg)
+        return "Got image", {"images": [img]}
