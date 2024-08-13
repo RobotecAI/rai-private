@@ -35,7 +35,7 @@ import sensor_msgs.msg
 import std_msgs.msg
 from cv_bridge import CvBridge
 from langchain.tools import tool
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_ollama import ChatOllama
@@ -44,6 +44,7 @@ from langgraph.graph.graph import CompiledGraph
 from rclpy.action import get_action_names_and_types
 from rclpy.node import Node
 from rclpy.wait_for_message import wait_for_message
+from std_srvs.srv import Trigger
 
 from rai.agents.state_based import State, create_state_based_agent
 from rai.scenario_engine.messages import HumanMultimodalMessage
@@ -281,6 +282,14 @@ class RaiNode(Node):
         self.state_topics = observe_topics
         self.state_postprocessors = observe_postprocessors
 
+        self.constitution_service = self.create_client(
+            Trigger,
+            "rai_whoami_constitution_service",
+        )
+        self.identity_service = self.create_client(
+            Trigger, "rai_whoami_identity_service"
+        )
+
         # ---------- ROS Parameters ----------
         self.task_topic = "/task_addition_requests"
 
@@ -300,9 +309,48 @@ class RaiNode(Node):
         self.state_subscribers = dict()
         self.initialize_robot_state_interfaces(self.state_topics)
         self.initialize_task_subscriber()
+        self.system_prompt = self.initialize_system_prompt()
 
         # ---------- LLM Agents ----------
+        self.AGENT_RECURSION_LIMIT = 100
         self.llm_app: CompiledGraph = None
+
+    def initialize_system_prompt(self):
+        while not self.constitution_service.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(
+                "Constitution service not available, waiting again..."
+            )
+
+        while not self.identity_service.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info("Identity service not available, waiting again...")
+
+        constitution_request = Trigger.Request()
+
+        constitution_future = self.constitution_service.call_async(constitution_request)
+        rclpy.spin_until_future_complete(self, constitution_future)
+        constitution_response = constitution_future.result()
+
+        identity_request = Trigger.Request()
+
+        identity_future = self.identity_service.call_async(identity_request)
+        rclpy.spin_until_future_complete(self, identity_future)
+        identity_response = identity_future.result()
+
+        system_prompt = f"""
+        Constitution:
+        {constitution_response.message}
+
+        Identity:
+        {identity_response.message}
+
+        You are a helpful assistant. You converse with users.
+        Assume the conversation is carried over a voice interface, so try not to overwhelm the user.
+        If you have multiple questions, please ask them one by one allowing user to respond before
+        moving forward to the next question. Keep the conversation short and to the point.
+        """
+
+        self.get_logger().info(f"System prompt initialized: {system_prompt}")
+        return system_prompt
 
     def set_app(self, app: CompiledGraph):
         self.llm_app = app
@@ -415,14 +463,20 @@ class RaiNode(Node):
         state_dict["logs_summary"] = self.rosout_buffer.summarize()
         return state_dict
 
-    # ---------- ROS Interface Callbacks ----------
     def task_callback(self, msg: std_msgs.msg.String):
         self.get_logger().info(f"Received task: {msg.data}")
-        payload = State(messages=[HumanMessage(content=msg.data)])
+
+        messages = [
+            SystemMessage(content=self.system_prompt),
+            HumanMessage(content=f"Task: {msg.data}"),
+        ]
+
+        payload = State(messages=messages)
 
         state: State = self.llm_app.invoke(
-            payload
+            payload, {"recursion_limit": self.AGENT_RECURSION_LIMIT}
         )  # TODO(boczekbartek): increase recursion limit
+
         report = state["messages"][-1]
 
         report = pformat(report.json())
@@ -434,7 +488,6 @@ class RaiNode(Node):
         self._actions_cache.clear()
         self.rosout_buffer.clear()
 
-    # ---------- Other ROS Callbacks ----------
     def generic_state_subscriber_callback(self, topic_name: str, msg: Any):
         self.robot_state[topic_name] = msg
 
@@ -443,39 +496,28 @@ class RaiNode(Node):
             return
         self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
 
-    # ---------- LLM Utilities ----------
+    def get_actions_cache(self) -> RaiActionStoreInterface:
+        return self._actions_cache
 
-    #
-    # def get_actions_cache(self) -> RaiActionStoreInterface:
-    #     return self._actions_cache
-    #
-    # def get_results(self, uid: Optional[str]):
-    #     self.get_logger().info("Getting results")
-    #     return self._actions_cache.get_results(uid)
-    #
-    # def get_feedbacks(self, uid: Optional[str] = None):
-    #     self.get_logger().info("Getting feedbacks")
-    #     return self._actions_cache.get_feedbacks(uid)
-    #
-    # def cancel_action(self, uid: str):
-    #     self.get_logger().info(f"Canceling action: {uid=}")
-    #     return self._actions_cache.cancel_action(uid)
-    #
-    # def get_running_actions(self):
-    #     return self._actions_cache.get_uids()
-    #
-    # def feedback_callback(self, uid: str, feedback_msg: Any):
-    #     feedback = feedback_msg.feedback
-    #     self.get_logger().debug(f"Received feedback: {feedback}")
-    #     self._actions_cache.add_feedback(uid, feedback)
-    #
-    # def get_state(self):
-    #     self.get_logger().info("Getting state")
-    #     future = self.state_client.call_async(std_srvs.srv.Trigger.Request())
-    #     rclpy.spin_until_future_complete(self, future)
-    #     result: std_srvs.srv.Trigger.Response = future.result()
-    #     return result.message
-    #
+    def get_results(self, uid: Optional[str]):
+        self.get_logger().info("Getting results")
+        return self._actions_cache.get_results(uid)
+
+    def get_feedbacks(self, uid: Optional[str] = None):
+        self.get_logger().info("Getting feedbacks")
+        return self._actions_cache.get_feedbacks(uid)
+
+    def cancel_action(self, uid: str):
+        self.get_logger().info(f"Canceling action: {uid=}")
+        return self._actions_cache.cancel_action(uid)
+
+    def get_running_actions(self):
+        return self._actions_cache.get_uids()
+
+    def feedback_callback(self, uid: str, feedback_msg: Any):
+        feedback = feedback_msg.feedback
+        self.get_logger().debug(f"Received feedback: {feedback}")
+        self._actions_cache.add_feedback(uid, feedback)
 
 
 def describe_ros_image(
@@ -491,7 +533,7 @@ def describe_ros_image(
 
 if __name__ == "__main__":
     rclpy.init()
-    llm = ChatOpenAI(model="gpt-4o-mini")
+    llm = ChatOpenAI(model="gpt-4o")
 
     observe_topics = [
         "/camera/camera/color/image_raw",
