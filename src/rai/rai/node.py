@@ -15,13 +15,13 @@
 
 import base64
 import functools
-import json
 import logging
 import time
 from abc import ABCMeta, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Literal, Optional, Tuple, TypedDict, cast
+from pprint import pformat
+from typing import Any, Deque, Dict, List, Literal, Optional, Tuple, Type, cast
 
 import cv2
 import rcl_interfaces.msg
@@ -35,23 +35,18 @@ import sensor_msgs.msg
 import std_msgs.msg
 from cv_bridge import CvBridge
 from langchain.tools import tool
-from langchain_core.messages import (
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
-from langgraph.graph import END, START, StateGraph
 from langgraph.graph.graph import CompiledGraph
 from rclpy.action import get_action_names_and_types
 from rclpy.node import Node
 from rclpy.wait_for_message import wait_for_message
 
-from rai.scenario_engine.messages import HumanMultimodalMessage, ToolMultimodalMessage
+from rai.agents.state_based import State, create_state_based_agent
+from rai.scenario_engine.messages import HumanMultimodalMessage
 from rai.tools.ros.native import (
     Ros2BaseInput,
     Ros2BaseTool,
@@ -216,13 +211,6 @@ class RosoutBuffer:
         return str(response.content)
 
 
-class State(TypedDict):
-    messages: List[BaseMessage]
-    robot_state: BaseMessage
-    current_task: str
-    next_edge: Optional[str]
-
-
 class TaskResolved(BaseModel):
     resolved: bool = Field(..., description="Whether the task was resolved or not")
 
@@ -237,18 +225,45 @@ class TopicInput(Ros2BaseInput):
     topic_name: str = Field(..., description="Ros2 topic name")
 
 
+def convert_ros_img_to_base64(msg: sensor_msgs.msg.Image) -> str:
+    bridge = CvBridge()
+    cv_image = cast(cv2.Mat, bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough"))  # type: ignore
+    if cv_image.shape[-1] == 4:
+        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGRA2RGB)
+        return base64.b64encode(bytes(cv2.imencode(".png", cv_image)[1])).decode(
+            "utf-8"
+        )
+    else:
+        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        image_data = cv2.imencode(".png", cv_image)[1].tostring()  # type: ignore
+        return base64.b64encode(image_data).decode("utf-8")  # type: ignore
+
+
 class GetMsgFromTopic(Ros2BaseTool):
     name = "get_msg_from_topic"
     description: str = "Get message from topic"
-    args_schema = TopicInput
+    args_schema: Type[TopicInput] = TopicInput
+    response_format: str = "content_and_artifact"
 
     def _run(self, topic_name: str):
         msg = node.get_raw_message_from_topic(topic_name)
         if type(msg) is sensor_msgs.msg.Image:
-            img = self.node.convert_ros_img_to_base64(msg)
-            return {"content": "Got image", "images": [img]}
+            img = convert_ros_img_to_base64(msg)
+            return "Got image", {"images": [img]}
         else:
-            return str(msg)
+            return str(msg), {}
+
+
+class GetCameraImage(Ros2BaseTool):
+    name = "get_camera_image"
+    description: str = "get image from robots camera"
+    response_format: str = "content_and_artifact"
+
+    def _run(self):
+        topic_name = "/camera/camera/color/image_raw"
+        msg = node.get_raw_message_from_topic(topic_name)
+        img = convert_ros_img_to_base64(msg)
+        return "Got image", {"images": [img]}
 
 
 @dataclass
@@ -259,22 +274,12 @@ class NodeDiscovery:
 
 
 class RaiNode(Node):
-    def __init__(self):
+    def __init__(self, observe_topics, observe_postprocessors):
         super().__init__("rai_node")
         self._actions_cache = RaiActionStore()
         self.robot_state = dict()
-        self.tools = [
-            wait_for_2s,
-            GetMsgFromTopic(node=self),
-            Ros2GetTopicsNamesAndTypesTool(node=self),
-        ]
-        self.tools_by_name = {tool.name: tool for tool in self.tools}
-        self.state_topics = [
-            "/camera/camera/color/image_raw",
-        ]
-        self.state_postprocessors = {
-            "/camera/camera/color/image_raw": self.describe_image
-        }
+        self.state_topics = observe_topics
+        self.state_postprocessors = observe_postprocessors
 
         # ---------- ROS Parameters ----------
         self.task_topic = "/task_addition_requests"
@@ -295,11 +300,12 @@ class RaiNode(Node):
         self.state_subscribers = dict()
         self.initialize_robot_state_interfaces(self.state_topics)
         self.initialize_task_subscriber()
-        self.llm_workflow = self.initialize_llm_workflow()
 
         # ---------- LLM Agents ----------
-        self.big_llm = ChatOpenAI(model="gpt-4o").bind_tools(self.tools)
-        self.small_llm = ChatOpenAI(model="gpt-4o-mini")
+        self.llm_app: CompiledGraph = None
+
+    def set_app(self, app: CompiledGraph):
+        self.llm_app = app
 
     def discovery(self):
         def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
@@ -350,14 +356,15 @@ class RaiNode(Node):
 
             if success:
                 self.get_logger().info(
-                    f"Received message of type {self.message_type.__class__.__name__} from topic {self.topic}"  # type: ignore
+                    f"Received message of type {msg_type.__class__.__name__} from topic {topic}"
                 )
                 return msg
             else:
-                self.get_logger().error(
-                    f"Failed to receive message of type {self.message_type.__class__.__name__} from topic {self.topic}"  # type: ignore
+                error = (
+                    f"No message received in {timeout_sec} seconds from topic {topic}"
                 )
-                return f"Failed to get msg in {timeout_sec} seconds"
+                self.get_logger().error(error)
+                return error
 
     def initialize_robot_state_interfaces(self, topics):
         self.rosout_buffer = RosoutBuffer()
@@ -393,91 +400,7 @@ class RaiNode(Node):
             qos_profile=self.qos_profile,
         )
 
-    def initialize_llm_workflow(self) -> CompiledGraph:
-        workflow = StateGraph(State)
-
-        # ---------- Nodes ----------
-        workflow.add_node("get_robot_state", self.get_robot_state)
-        workflow.add_node("reason", self.reason)
-        workflow.add_node("should_continue", self.should_continue)
-        workflow.add_node("tools", self.run_tools)
-
-        # ----------  Edges ----------
-        workflow.add_edge(START, "get_robot_state")
-        workflow.add_edge("get_robot_state", "reason")
-        workflow.add_edge("reason", "should_continue")
-        workflow.add_edge("tools", "reason")
-        workflow.add_conditional_edges("should_continue", self.route)
-
-        return workflow.compile()
-
-    def route(self, state: State) -> Literal["tools", "get_robot_state", END]:
-        if state["next_edge"] is None:
-            return END
-        elif state["next_edge"] == "get_robot_state":
-            return "get_robot_state"
-        elif state["next_edge"] == "tools":
-            return "tools"
-        else:
-            self.get_logger().info(f"Unknown edge: {state['next_edge']}")
-            return END
-
-    # ---------- LLM Workflow Nodes ----------
-    def summarize_messages(self, state: State) -> str:
-        summary = ""
-        for m in state["messages"]:
-            summary += f"{m=}\n"
-        return summary
-
-    def reason(self, state: State) -> State:
-        if len(state["messages"]) > 0:  # TODO(boczekbartek): add robot state
-            self.get_logger().info(self.summarize_messages(state))
-            input = (
-                [SystemMessage(content=state["current_task"])]
-                + state["messages"]
-                # + state["messages"][:-2]
-                # # + [state["robot_state"]]
-                # + state["messages"][-1:]
-            )
-        else:
-            input = [SystemMessage(content=state["current_task"]), state["robot_state"]]
-
-        msg = self.big_llm.invoke(input)
-        state["messages"].append(msg)
-        return state
-
-    def run_tools(self, state: State) -> State:
-        result = []
-        for tool_call in state["messages"][-1].tool_calls:
-            tool = self.tools_by_name[tool_call["name"]]
-            try:
-                self.get_logger().info(
-                    f"Trying tool {tool_call['name']} call with args: {tool_call['args']}"
-                )
-                observation = tool.invoke(tool_call["args"])
-                self.get_logger().info(f"Succeeded, observation: {observation}")
-            except Exception as e:
-                self.get_logger().error(f"Error running tool: {e}")
-                observation = f"Error running tool: {e}"
-            if isinstance(observation, dict):
-                self.get_logger().info(
-                    f"Tool observation: {observation.get('content')}"
-                )
-                tool_message = ToolMultimodalMessage(
-                    content=observation.get("content", "No response from the tool."),
-                    images=observation.get("images"),
-                    tool_call_id=tool_call["id"],
-                )
-                tool_messages = tool_message.postprocess(format="openai")
-                result.extend(tool_messages)
-            else:
-                self.get_logger().info(f"Tool observation: {observation}")
-                result.append(
-                    ToolMessage(content=str(observation), tool_call_id=tool_call["id"])
-                )
-        state["messages"].extend(result)
-
-    def get_robot_state(self, state: State) -> State:
+    def get_robot_state(self) -> Dict[str, str]:
         state_dict = dict()
         for t in self.state_subscribers:
             if t not in self.robot_state:
@@ -490,58 +413,29 @@ class RaiNode(Node):
             state_dict[t] = msg
 
         state_dict["logs_summary"] = self.rosout_buffer.summarize()
-        state["robot_state"] = HumanMessage(json.dumps(state_dict))
-        return state
+        return state_dict
 
-    def should_continue(self, state: State) -> State:
-        chat_history = state["messages"]
-
-        # Check if tool call requested
-        last_message = chat_history[-1]
-        if last_message.tool_calls:
-            self.get_logger().info(f"Tool call requested: {last_message.tool_calls}")
-            state["next_edge"] = "tools"
-            return state
-
-        system_prompt = SystemMessage(
-            content="You are a critic. Your job is to determine if the task is completed."
-        )
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "{system_prompt}"),
-                ("human", "The task to judge. {task}"),
-                ("human", "The chat history that you should judge upon"),
-                ("placeholder", "{chat_history}"),
-            ]
-        )
-        task = state["current_task"]
-        chain = prompt | self.small_llm.with_structured_output(TaskResolved)
-
-        task_resolved: TaskResolved = chain.invoke(
-            {"system_prompt": system_prompt, "task": task, "chat_history": chat_history}
-        )  # type: ignore
-
-        state["next_edge"] = None if task_resolved.resolved else "get_robot_state"
-        return state
-
-    # ---------- ROS Callbacks ----------
+    # ---------- ROS Interface Callbacks ----------
     def task_callback(self, msg: std_msgs.msg.String):
         self.get_logger().info(f"Received task: {msg.data}")
-        payload = {
-            "current_task": msg.data,
-            "messages": [],
-            "robot_state": None,
-        }
+        payload = State(messages=[HumanMessage(content=msg.data)])
 
-        self.llm_workflow.invoke(
+        state: State = self.llm_app.invoke(
             payload
         )  # TODO(boczekbartek): increase recursion limit
+        report = state["messages"][-1]
+
+        report = pformat(report.json())
+        self.get_logger().info(f"Finished task:\n{report}")
 
         self.clear_state()
-        self.get_logger().info("Finished task")
 
-    def generic_state_subscriber_callback(self, topic_name, msg: Any):
+    def clear_state(self):
+        self._actions_cache.clear()
+        self.rosout_buffer.clear()
+
+    # ---------- Other ROS Callbacks ----------
+    def generic_state_subscriber_callback(self, topic_name: str, msg: Any):
         self.robot_state[topic_name] = msg
 
     def rosout_callback(self, msg: rcl_interfaces.msg.Log):
@@ -549,37 +443,7 @@ class RaiNode(Node):
             return
         self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
 
-    # ---------- LLM Tools ----------
-
     # ---------- LLM Utilities ----------
-    def describe_image(
-        self, msg: sensor_msgs.msg.Image
-    ) -> Dict[Literal["camera_image_summary"], str]:
-        PROMPT = """Please describe the image in 2 sentences max 150 chars."""
-        base64_image = self.convert_ros_img_to_base64(msg)
-        llm_msg = HumanMultimodalMessage(content=PROMPT, images=[base64_image])
-        output = self.small_llm.invoke([llm_msg])
-        return {"camera_image_summary": str(output.content)}
-
-    # ---------- ROS Utilities ----------
-
-    # ---------- Other Utilities ----------
-    def convert_ros_img_to_base64(self, msg: sensor_msgs.msg.Image) -> str:
-        bridge = CvBridge()
-        cv_image = cast(cv2.Mat, bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough"))  # type: ignore
-        if cv_image.shape[-1] == 4:
-            cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGRA2RGB)
-            return base64.b64encode(bytes(cv2.imencode(".png", cv_image)[1])).decode(
-                "utf-8"
-            )
-        else:
-            cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-            image_data = cv2.imencode(".png", cv_image)[1].tostring()  # type: ignore
-            return base64.b64encode(image_data).decode("utf-8")  # type: ignore
-
-    def clear_state(self):
-        self._actions_cache.clear()
-        self.rosout_buffer.clear()
 
     #
     # def get_actions_cache(self) -> RaiActionStoreInterface:
@@ -614,10 +478,49 @@ class RaiNode(Node):
     #
 
 
+def describe_ros_image(
+    msg: sensor_msgs.msg.Image,
+) -> Dict[Literal["camera_image_summary"], str]:
+    PROMPT = """Please describe the image in 2 sentences max 150 chars."""
+    small_llm = ChatOpenAI(model="gpt-4o-mini")
+    base64_image = convert_ros_img_to_base64(msg)
+    llm_msg = HumanMultimodalMessage(content=PROMPT, images=[base64_image])
+    output = small_llm.invoke([llm_msg])
+    return {"camera_image_summary": str(output.content)}
+
+
 if __name__ == "__main__":
     rclpy.init()
+    llm = ChatOpenAI(model="gpt-4o-mini")
 
-    node = RaiNode()
+    observe_topics = [
+        "/camera/camera/color/image_raw",
+    ]
+
+    observe_postprocessors = {"/camera/camera/color/image_raw": describe_ros_image}
+
+    node = RaiNode(
+        observe_topics=observe_topics, observe_postprocessors=observe_postprocessors
+    )
+
+    tools = [
+        wait_for_2s,
+        GetMsgFromTopic(node=node),
+        Ros2GetTopicsNamesAndTypesTool(node=node),
+        GetCameraImage(node=node),
+    ]
+
+    state_retriever = node.get_robot_state
+
+    app = create_state_based_agent(
+        llm=llm,
+        tools=tools,
+        state_retriever=state_retriever,
+        logger=node.get_logger(),
+    )
+
+    node.set_app(app)
+
     executor = rclpy.executors.MultiThreadedExecutor()
     executor.add_node(node)
     executor.spin()
