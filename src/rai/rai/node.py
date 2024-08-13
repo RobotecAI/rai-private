@@ -255,7 +255,7 @@ class RaiBaseNode(Node):
         self,
         node_name: str,
         observe_topics: Optional[List[str]] = None,
-        observe_postprocessors: Optional[List[Callable]] = None,
+        observe_postprocessors: Optional[Dict[str, Callable]] = None,
         whitelist: Optional[List[str]] = None,
         *args,
         **kwargs,
@@ -266,7 +266,7 @@ class RaiBaseNode(Node):
         self.robot_state = dict()
         self.state_topics = observe_topics if observe_topics is not None else []
         self.state_postprocessors = (
-            observe_postprocessors if observe_postprocessors is not None else []
+            observe_postprocessors if observe_postprocessors is not None else dict()
         )
 
         self.constitution_service = self.create_client(
@@ -404,12 +404,21 @@ class RaiBaseNode(Node):
 
 
 class RaiNode(RaiBaseNode):
-    def __init__(self, observe_topics=None, observe_postprocessors=None,
-                 ):
+    def __init__(
+        self,
+        observe_topics: Optional[List[str]] = None,
+        observe_postprocessors: Optional[Dict[str, Callable]] = None,
+        whitelist: Optional[List[str]] = None,
+        *args,
+        **kwargs,
+    ):
         super().__init__(
             "rai_node",
             observe_topics=observe_topics,
             observe_postprocessors=observe_postprocessors,
+            whitelist=whitelist,
+            *args,
+            **kwargs,
         )
         self._actions_cache = RaiActionStore()
 
@@ -455,7 +464,15 @@ class RaiNode(RaiBaseNode):
                 msg = self.state_postprocessors[t](msg)
             state_dict[t] = msg
 
+        state_dict.update(
+            {
+                "action_results": self.get_results(),
+                "action_feedbacks": self.get_feedbacks(),
+            }
+        )
+
         state_dict["logs_summary"] = self.rosout_buffer.summarize()
+        self.get_logger().info(f"{state_dict=}")
         return state_dict
 
     def task_callback(self, msg: std_msgs.msg.String):
@@ -491,7 +508,7 @@ class RaiNode(RaiBaseNode):
     def get_actions_cache(self) -> RaiActionStoreInterface:
         return self._actions_cache
 
-    def get_results(self, uid: Optional[str]):
+    def get_results(self, uid: Optional[str] = None):
         self.get_logger().info("Getting results")
         return self._actions_cache.get_results(uid)
 
