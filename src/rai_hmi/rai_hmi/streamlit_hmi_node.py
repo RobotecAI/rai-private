@@ -81,9 +81,15 @@ class HMINode(RaiBaseNode):
 def initialize_ros(robot_description_package: str):
 
     rclpy.init()
+    SYSTEM_PROMPT = """You are a helpful assistant. You converse with users.
+        Assume the conversation is carried over a voice interface, so try not to overwhelm the user.
+        If you have multiple questions, please ask them one by one allowing user to respond before
+        moving forward to the next question. Keep the conversation short and to the point.
+        Always reply in first person. When you use the tool and get the output, always present it in first person.
+        Do not ever guess the topic name. If you don't know the topic, use the available tools to find it."""
 
     if package_name is not None:
-        hmi_node = HMINode(robot_description_package=robot_description_package)
+        hmi_node = HMINode(robot_description_package=robot_description_package, system_prompt=SYSTEM_PROMPT)
         thread = Thread(target=rclpy.spin, args=(hmi_node,), daemon=True)
         thread.start()
         system_prompt = hmi_node.initialize_system_prompt()

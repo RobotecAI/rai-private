@@ -56,7 +56,7 @@ class Ros2GetActionNamesAndTypesTool(Ros2BaseTool):
         return self.node.ros_discovery_info.actions_and_types
 
 
-class Ros2ActionRunner(Ros2BaseTool):
+class Ros2RunAction(Ros2BaseTool):
     name: str = "Ros2ActionRunner"
     description: str = "A tool for running a ros2 action"
 

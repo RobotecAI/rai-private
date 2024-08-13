@@ -85,6 +85,14 @@ class Ros2GetTopicsNamesAndTypesTool(Ros2BaseTool):
         return self.node.ros_discovery_info.topics_and_types
 
 
+class Ros2GetRobotInterfaces(Ros2BaseTool):
+    name: str = "ros2_robot_interfaces"
+    description: str = "A tool for getting all ros2 robot interfaces"
+
+    def _run(self):
+        return self.node.ros_discovery_info.dict()
+
+
 class Ros2ShowMsgInterfaceTool(BaseTool):
     name: str = "Ros2ShowMsgInterface"
     description: str = """A tool for showing ros2 message interface in json format.

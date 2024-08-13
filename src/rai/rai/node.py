@@ -34,7 +34,6 @@ import std_msgs.msg
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
 from rclpy.action.graph import get_action_names_and_types
@@ -44,18 +43,8 @@ from std_srvs.srv import Trigger
 
 from rai.agents.state_based import State, create_state_based_agent
 from rai.scenario_engine.messages import HumanMultimodalMessage
-from rai.tools.ros.native import (
-    GetCameraImage,
-    GetMsgFromTopic,
-    Ros2GetTopicsNamesAndTypesTool,
-)
-from rai.tools.ros.native_actions import (
-    Ros2ActionRunner,
-    Ros2CancelAction,
-    Ros2CheckActionResults,
-    Ros2GetActionNamesAndTypesTool,
-    Ros2GetRegisteredActions,
-)
+from rai.tools.ros.native import GetCameraImage, GetMsgFromTopic, Ros2GetRobotInterfaces
+from rai.tools.ros.native_actions import Ros2CancelAction, Ros2RunAction
 from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
 
 
@@ -181,7 +170,7 @@ class RaiActionStore(RaiActionStoreInterface):
 
 
 class RosoutBuffer:
-    def __init__(self, bufsize: int = 100) -> None:
+    def __init__(self, llm, bufsize: int = 100) -> None:
         self.bufsize = bufsize
         self._buffer: Deque[str] = deque()
         self.template = ChatPromptTemplate.from_messages(
@@ -193,7 +182,7 @@ class RosoutBuffer:
                 ("human", "{rosout}"),
             ]
         )
-        llm = ChatOllama(model="llama3.1")
+        llm = llm
         self.llm = self.template | llm
 
     def clear(self):
@@ -229,9 +218,12 @@ class NodeDiscovery:
     whitelist: Optional[List[str]] = field(default_factory=list)
 
     def set(self, topics, services, actions):
-        self.topics_and_types = self.to_dict(topics)
-        self.services_and_types = self.to_dict(services)
-        self.actions_and_types = self.to_dict(actions)
+        def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
+            return {k: v[0] for k, v in info}
+
+        self.topics_and_types = to_dict(topics)
+        self.services_and_types = to_dict(services)
+        self.actions_and_types = to_dict(actions)
         if self.whitelist is not None:
             self.__filter(self.whitelist)
 
@@ -245,15 +237,20 @@ class NodeDiscovery:
             for k in to_remove:
                 d.pop(k)
 
-    @staticmethod
-    def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
-        return {k: v[0] for k, v in info}
+    def dict(self):
+        return {
+            "topics_and_types": self.topics_and_types,
+            "services_and_types": self.services_and_types,
+            "actions_and_types": self.actions_and_types,
+        }
 
 
 class RaiBaseNode(Node):
     def __init__(
         self,
         node_name: str,
+        system_prompt: str,
+        llm,
         observe_topics: Optional[List[str]] = None,
         observe_postprocessors: Optional[Dict[str, Callable]] = None,
         whitelist: Optional[List[str]] = None,
@@ -261,6 +258,7 @@ class RaiBaseNode(Node):
         **kwargs,
     ):
         super().__init__(node_name, *args, **kwargs)
+        self.llm = llm
 
         self.whitelist = whitelist
         self.robot_state = dict()
@@ -277,7 +275,7 @@ class RaiBaseNode(Node):
             Trigger, "rai_whoami_identity_service"
         )
 
-        self.DISCOVERY_FREQ = 0.5
+        self.DISCOVERY_FREQ = 2.0
         self.DISCOVERY_DEPTH = 5
 
         self.callback_group = rclpy.callback_groups.ReentrantCallbackGroup()
@@ -289,14 +287,14 @@ class RaiBaseNode(Node):
         self.ros_discovery_info = NodeDiscovery(whitelist=self.whitelist)
         self.discovery()
 
-        self.qos_profile = rclpy.qos.qos_profile_sensor_data
+        self.qos_profile = rclpy.qos.qos_profile_best_available
 
         self.state_subscribers = dict()
         self.initialize_robot_state_interfaces(self.state_topics)
 
-        self.system_prompt = self.initialize_system_prompt()
+        self.system_prompt = self.initialize_system_prompt(system_prompt)
 
-    def initialize_system_prompt(self):
+    def initialize_system_prompt(self, prompt: str):
         while not self.constitution_service.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(
                 "Constitution service not available, waiting again..."
@@ -324,12 +322,7 @@ class RaiBaseNode(Node):
         Identity:
         {identity_response.message}
 
-        You are a helpful assistant. You converse with users.
-        Assume the conversation is carried over a voice interface, so try not to overwhelm the user.
-        If you have multiple questions, please ask them one by one allowing user to respond before
-        moving forward to the next question. Keep the conversation short and to the point.
-        Always reply in first person. When you use the tool and get the output, always present it in first person.
-        Do not ever guess the topic name. If you don't know the topic, use the available tools to find it.
+        {prompt}
         """
 
         self.get_logger().info(f"System prompt initialized: {system_prompt}")
@@ -382,10 +375,11 @@ class RaiBaseNode(Node):
         raise KeyError(f"Topic {topic} not found")
 
     def generic_state_subscriber_callback(self, topic_name: str, msg: Any):
+        self.get_logger().info(f"Received message from topic: {topic_name}")
         self.robot_state[topic_name] = msg
 
     def initialize_robot_state_interfaces(self, topics):
-        self.rosout_buffer = RosoutBuffer()
+        self.rosout_buffer = RosoutBuffer(self.llm)
 
         for topic in topics:
             msg_type = self.get_msg_type(topic)
@@ -406,6 +400,9 @@ class RaiBaseNode(Node):
 class RaiNode(RaiBaseNode):
     def __init__(
         self,
+        system_prompt: str,
+        llm,
+        observe_preprocessors: Optional[Dict[str, Callable]] = None,
         observe_topics: Optional[List[str]] = None,
         observe_postprocessors: Optional[Dict[str, Callable]] = None,
         whitelist: Optional[List[str]] = None,
@@ -414,6 +411,8 @@ class RaiNode(RaiBaseNode):
     ):
         super().__init__(
             "rai_node",
+            llm=llm,
+            system_prompt=system_prompt,
             observe_topics=observe_topics,
             observe_postprocessors=observe_postprocessors,
             whitelist=whitelist,
@@ -573,22 +572,26 @@ if __name__ == "__main__":
         "/undock_robot",
         "/wait",
     ]
+    SYSTEM_PROMPT = "You are an autonomous agent. Your main goal is to fulfill the user's requests. "
+    "Do not make assumptions about the environment you are currently in. "
+    "Use the tooling provided to gather information about the environment."
 
     node = RaiNode(
+        llm=ChatOpenAI(model="gpt-4o-mini"),
         observe_topics=observe_topics,
         observe_postprocessors=observe_postprocessors,
         whitelist=topics_whitelist + actions_whitelist,
+        system_prompt=SYSTEM_PROMPT,
     )
 
     tools = [
         wait_for_2s,
         GetMsgFromTopic(node=node),
-        Ros2GetTopicsNamesAndTypesTool(node=node),
-        Ros2GetActionNamesAndTypesTool(node=node),
-        Ros2GetRegisteredActions(node=node),
-        Ros2CheckActionResults(node=node),
+        # Ros2GetTopicsNamesAndTypesTool(node=node),
+        # Ros2GetActionNamesAndTypesTool(node=node),
+        Ros2GetRobotInterfaces(node=node),
         Ros2CancelAction(node=node),
-        Ros2ActionRunner(node=node),
+        Ros2RunAction(node=node),
         GetCameraImage(node=node),
     ]
 
