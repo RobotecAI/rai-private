@@ -96,7 +96,11 @@ class Ros2RunActionSync(Ros2BaseTool):
             )
 
         uid = str(uuid.uuid4())
+
+        self.node.get_logger().info(f"Sending action message: {goal_msg}")
         result = client.send_goal(goal_msg)
+        self.node.get_logger().info("Action finished and result received!")
+
         if result is not None:
             status = result.status
         else:
