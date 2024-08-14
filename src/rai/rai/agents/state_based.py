@@ -115,7 +115,9 @@ class ToolRunner(RunnableCallable):
 
             try:
                 output = self.tools_by_name[call["name"]].invoke(call, config)  # type: ignore
-                self.logger.info("Tool output: " + str(output))
+                self.logger.info(
+                    "Tool output (max 100 chars): " + str(output.content[0:100])
+                )
             except ValidationError as e:
                 self.logger.info(
                     f'Args validation error in "{call["name"]}", error: {e}'
