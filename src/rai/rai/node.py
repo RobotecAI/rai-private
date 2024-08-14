@@ -45,7 +45,6 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
-from rclpy.wait_for_message import wait_for_message
 from std_srvs.srv import Trigger
 
 from rai.agents.state_based import State, create_state_based_agent
@@ -57,7 +56,11 @@ from rai.tools.ros.native import (
 )
 from rai.tools.ros.native_actions import Ros2RunActionSync
 from rai.tools.ros.tools import GetOccupancyGridTool
-from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
+from rai.tools.ros.utils import (
+    convert_ros_img_to_base64,
+    import_message_from_str,
+    wait_for_message,
+)
 
 
 class RosoutBuffer:
