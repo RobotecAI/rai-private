@@ -54,7 +54,7 @@ class Ros2GetActionNamesAndTypesTool(Ros2BaseTool):
         return self.node.ros_discovery_info.actions_and_types
 
 
-class Ros2RunAction(Ros2BaseTool):
+class Ros2RunActionSync(Ros2BaseTool):
     name: str = "Ros2RunAction"
     description: str = "A tool for running a ros2 action"
 
@@ -81,13 +81,12 @@ class Ros2RunAction(Ros2BaseTool):
     def _run(
         self, action_name: str, action_type: str, action_goal_args: Dict[str, Any]
     ):
-        node = self.node
         try:
             goal_msg, msg_cls = self._build_msg(action_type, action_goal_args)
         except Exception as e:
             return f"Failed to build message: {e}"
 
-        client = ActionClient(node, msg_cls, action_name)
+        client = ActionClient(self.node, msg_cls, action_name)
 
         while not client.wait_for_server(timeout_sec=1.0):
             self.node.get_logger().info(
@@ -96,18 +95,22 @@ class Ros2RunAction(Ros2BaseTool):
 
         uid = str(uuid.uuid4())
         result = client.send_goal(goal_msg)
-        status = result.status
+        if result is not None:
+            status = result.status
+        else:
+            status = GoalStatus.STATUS_UNKNOWN
+
         if status == GoalStatus.STATUS_SUCCEEDED:
-            node.get_logger().info(f"Action(uid={uid}) succeeded")
+            self.node.get_logger().info(f"Action(uid={uid}) succeeded")
             res = "Action succeeded"
         elif status == GoalStatus.STATUS_ABORTED:
-            node.get_logger().info(f"Action(uid={uid}) aborted")
+            self.node.get_logger().info(f"Action(uid={uid}) aborted")
             res = "Action aborted"
         elif status == GoalStatus.STATUS_CANCELED:
-            node.get_logger().info(f"Action(uid={uid}) canceled")
+            self.node.get_logger().info(f"Action(uid={uid}) canceled")
             res = "Action canceled"
         else:
-            node.get_logger().info(f"Action(uid={uid}) failed")
+            self.node.get_logger().info(f"Action(uid={uid}) failed")
             res = "Action failed"
         return res
 
