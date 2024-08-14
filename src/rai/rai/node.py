@@ -14,12 +14,12 @@
 #
 
 import functools
-import logging
 import time
-from abc import ABCMeta, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from pprint import pformat
+from queue import Queue
+from threading import Thread
 from typing import Any, Callable, Deque, Dict, List, Literal, Optional, Tuple
 
 import rcl_interfaces.msg
@@ -31,13 +31,11 @@ import rclpy.subscription
 import rclpy.task
 import sensor_msgs.msg
 import std_msgs.msg
-from action_msgs.msg import GoalStatus
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
-from nav2_simple_commander.robot_navigator import BasicNavigator
 from rclpy.action.graph import get_action_names_and_types
 from rclpy.node import Node
 from rclpy.qos import (
@@ -52,149 +50,13 @@ from std_srvs.srv import Trigger
 
 from rai.agents.state_based import State, create_state_based_agent
 from rai.scenario_engine.messages import HumanMultimodalMessage
-from rai.tools.ros.native import GetCameraImage, GetMsgFromTopic, Ros2GetRobotInterfaces
-from rai.tools.ros.native_actions import Ros2CancelAction, Ros2RunAction
+from rai.tools.ros.native import (
+    GetCameraImage,
+    GetMsgFromTopic,
+    Ros2ShowMsgInterfaceTool,
+)
+from rai.tools.ros.native_actions import Ros2RunActionSync
 from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
-
-
-class RaiActionStoreInterface(metaclass=ABCMeta):
-    @abstractmethod
-    def register_action(
-        self,
-        uid: str,
-        action_name: str,
-        action_type: str,
-        action_goal_args: Dict[str, Any],
-        result_future: rclpy.task.Future,
-    ):
-        pass
-
-    @abstractmethod
-    def get_uids(self) -> List[str]:
-        pass
-
-    @abstractmethod
-    def get_results(self, uid: Optional[str] = None) -> Dict[str, Any]:
-        pass
-
-    @abstractmethod
-    def cancel_action(self, uid: str) -> bool:
-        pass
-
-
-@dataclass
-class RaiActionStoreRecord:
-    uid: str
-    action_name: str
-    action_type: str
-    action_goal_args: Dict[str, Any]
-    result_future: rclpy.task.Future
-
-
-class RaiActionStore(RaiActionStoreInterface):
-    def __init__(self, node) -> None:
-        self._actions: Dict[str, RaiActionStoreRecord] = dict()
-        self._results: Dict[str, Any] = dict()
-        self._feedbacks: Dict[str, List[Any]] = dict()
-        self.node = node
-
-    def register_action(
-        self,
-        uid: str,
-        action_name: str,
-        action_type: str,
-        action_goal_args: Dict[str, Any],
-        result_future: rclpy.task.Future,
-    ):
-        self._actions[uid] = RaiActionStoreRecord(
-            uid=uid,
-            action_name=action_name,
-            action_type=action_type,
-            action_goal_args=action_goal_args,
-            result_future=result_future,
-        )
-        self._feedbacks[uid] = list()
-
-    def add_feedback(self, uid: str, feedback: Any):
-        if uid not in self._feedbacks:
-            logging.getLogger().warning(
-                "Received feedback for actions that don't exist"
-            )
-            return  # TODO(boczekbartek): fix
-        self._feedbacks[uid].append(feedback)
-
-    def clear(self):
-        self._actions.clear()
-        self._results.clear()
-        self._feedbacks.clear()
-
-    def get_uids(self) -> List[str]:
-        return list(self._actions.keys())
-
-    def drop_action(self, uid: str) -> bool:
-        if uid not in self._actions:
-            raise KeyError(f"Unknown action: {uid=}")
-        self._actions.pop(uid, None)
-        self._feedbacks.pop(uid, None)
-        logging.getLogger().info(f"Action(uid={uid}) dropped")
-        return True
-
-    def cancel_action(self, uid: str) -> bool:
-        if uid not in self._actions:
-            raise KeyError(f"Unknown action: {uid=}")
-        self._actions[uid].result_future.cancel()
-        self.drop_action(uid)
-        logging.getLogger().info(f"Action(uid={uid}) canceled")
-        return True
-
-    def get_results(self, uid: Optional[str] = None) -> Dict[str, Any]:
-        results = dict()
-        done_actions = list()
-        if uid is not None:
-            uids = [uid]
-        else:
-            uids = self.get_uids()
-        for uid in uids:
-            if uid not in self._actions:
-                raise KeyError(f"Unknown action: {uid=}")
-            action = self._actions[uid]
-            self.node.get_logger().info("spin")
-            rclpy.spin_until_future_complete(
-                self.node, action.result_future, timeout_sec=0.1
-            )
-            if action.result_future.result():
-                status = action.result_future.result().status
-                if status == GoalStatus.STATUS_SUCCEEDED:
-                    logging.getLogger().info(f"Action(uid={uid}) succeeded")
-                    res = "Action succeeded"
-                elif status == GoalStatus.STATUS_ABORTED:
-                    logging.getLogger().info(f"Action(uid={uid}) aborted")
-                    res = "Action aborted"
-                elif status == GoalStatus.STATUS_CANCELED:
-                    logging.getLogger().info(f"Action(uid={uid}) canceled")
-                    res = "Action canceled"
-                else:
-                    logging.getLogger().info(f"Action(uid={uid}) failed")
-                    res = "Action failed"
-                results[uid] = res
-                done_actions.append(uid)
-            else:
-                results[uid] = "Not done yet"
-
-        # Remove done actions
-        logging.getLogger().info(f"Removing done actions: {results.keys()=}")
-        for uid in done_actions:
-            self._actions.pop(uid, None)
-
-        return results
-
-    def get_feedbacks(self, uid: Optional[str] = None) -> List[Any]:
-
-        if uid is None:
-            return self._feedbacks
-        if uid not in self._feedbacks:
-            raise KeyError(f"Unknown action: {uid=}")
-        return self._feedbacks[uid]
 
 
 class RosoutBuffer:
@@ -396,7 +258,7 @@ class RaiBaseNode(Node):
                 self.get_logger().error(error)
                 return error
 
-    def get_msg_type(self, topic: str, n_tries: int = 10) -> Any:
+    def get_msg_type(self, topic: str, n_tries: int = 5) -> Any:
         """Sometimes node fails to do full discovery, therefore we need to retry"""
         for _ in range(n_tries):
             if topic in self.ros_discovery_info.topics_and_types:
@@ -409,6 +271,9 @@ class RaiBaseNode(Node):
         raise KeyError(f"Topic {topic} not found")
 
     def generic_state_subscriber_callback(self, topic_name: str, msg: Any):
+        self.get_logger().debug(
+            f"Received message of type {type(msg)} from topic {topic_name}"
+        )
         self.robot_state[topic_name] = msg
 
     def initialize_robot_state_interfaces(self, topics):
@@ -435,7 +300,6 @@ class RaiNode(RaiBaseNode):
         self,
         system_prompt: str,
         llm,
-        action_node,
         observe_topics: Optional[List[str]] = None,
         observe_postprocessors: Optional[Dict[str, Callable]] = None,
         whitelist: Optional[List[str]] = None,
@@ -452,8 +316,6 @@ class RaiNode(RaiBaseNode):
             *args,
             **kwargs,
         )
-        self.action_node = action_node
-        self._actions_cache = RaiActionStore(self.action_node)
 
         # ---------- ROS Parameters ----------
         self.task_topic = "/task_addition_requests"
@@ -473,6 +335,35 @@ class RaiNode(RaiBaseNode):
         self.AGENT_RECURSION_LIMIT = 100
         self.llm_app: CompiledGraph = None
 
+        self.task_queue = Queue()
+        self.agent_loop_thread = Thread(target=self.agent_loop)
+        self.agent_loop_thread.start()
+
+    def agent_loop(self):
+        while True:
+            if self.task_queue.empty():
+                time.sleep(0.1)
+                continue
+            data = self.task_queue.get()
+            self.get_logger().info(f"Agent loop received task: {data}")
+
+            messages = [
+                SystemMessage(content=self.system_prompt),
+                HumanMessage(content=f"Task: {data}"),
+            ]
+
+            payload = State(messages=messages)
+
+            state: State = self.llm_app.invoke(
+                payload, {"recursion_limit": self.AGENT_RECURSION_LIMIT}
+            )  # TODO(boczekbartek): increase recursion limit
+
+            report = state["messages"][-1]
+
+            report = pformat(report.json())
+            self.get_logger().info(f"Finished task:\n{report}")
+            self.clear_state()
+
     def set_app(self, app: CompiledGraph):
         self.llm_app = app
 
@@ -481,26 +372,23 @@ class RaiNode(RaiBaseNode):
             std_msgs.msg.String,
             self.task_topic,
             callback=self.task_callback,
-            # callback_group=self.callback_group,
             qos_profile=self.qos_profile,
         )
 
     def get_robot_state(self) -> Dict[str, str]:
         state_dict = dict()
-        # for t in self.state_subscribers:
-        #     if t not in self.robot_state:
-        #         msg = "No message yet"
-        #         state_dict[t] = msg
-        #         continue
-        #     msg = self.robot_state[t]
-        #     if t in self.state_postprocessors:
-        #         msg = self.state_postprocessors[t](msg)
-        #     state_dict[t] = msg
-
+        for t in self.state_subscribers:
+            if t not in self.robot_state:
+                msg = "No message yet"
+                state_dict[t] = msg
+                continue
+            msg = self.robot_state[t]
+            if t in self.state_postprocessors:
+                msg = self.state_postprocessors[t](msg)
+            state_dict[t] = msg
         state_dict.update(
             {
-                "action_results": self.get_results(),
-                "action_feedbacks": self.get_feedbacks(),
+                "robot_interfaces": self.ros_discovery_info.dict(),
             }
         )
 
@@ -510,71 +398,16 @@ class RaiNode(RaiBaseNode):
 
     def task_callback(self, msg: std_msgs.msg.String):
         self.get_logger().info(f"Received task: {msg.data}")
-
-        messages = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=f"Task: {msg.data}"),
-        ]
-
-        payload = State(messages=messages)
-
-        state: State = self.llm_app.invoke(
-            payload, {"recursion_limit": self.AGENT_RECURSION_LIMIT}
-        )  # TODO(boczekbartek): increase recursion limit
-
-        report = state["messages"][-1]
-
-        report = pformat(report.json())
-        self.get_logger().info(f"Finished task:\n{report}")
-
-        # import ipdb; ipdb.set_trace()
-        # BasicNavigator
-        #
-        # nav = self.action_node
-        # nav.spin(1.57, 5)
-        # while not nav.isTaskComplete():
-        #     feedback = nav.getFeedback()
-        #     self.get_logger().info(f"Feedback: {feedback}")
-        #
-        # result = nav.getResult()
-        # if result == TaskResult.SUCCEEDED:
-        #     self.get_logger().info('Goal succeeded!')
-        # elif result == TaskResult.CANCELED:
-        #     self.get_logger().info('Goal was canceled!')
-        # elif result == TaskResult.FAILED:
-        #     self.get_logger().info('Goal failed!')
+        self.task_queue.put(msg.data)
 
     def clear_state(self):
-        self._actions_cache.clear()
         self.rosout_buffer.clear()
 
     def rosout_callback(self, msg: rcl_interfaces.msg.Log):
+        self.get_logger().debug(f"Received rosout: {msg}")
         if "rai_node" in msg.name:
             return
         self.rosout_buffer.append(f"[{msg.stamp.sec}][{msg.name}]:{msg.msg}")
-
-    def get_actions_cache(self) -> RaiActionStoreInterface:
-        return self._actions_cache
-
-    def get_results(self, uid: Optional[str] = None):
-        self.get_logger().info("Getting results")
-        return self._actions_cache.get_results(uid)
-
-    def get_feedbacks(self, uid: Optional[str] = None):
-        self.get_logger().info("Getting feedbacks")
-        return self._actions_cache.get_feedbacks(uid)
-
-    def cancel_action(self, uid: str):
-        self.get_logger().info(f"Canceling action: {uid=}")
-        return self._actions_cache.cancel_action(uid)
-
-    def get_running_actions(self):
-        return self._actions_cache.get_uids()
-
-    def feedback_callback(self, uid: str, feedback_msg: Any):
-        feedback = feedback_msg.feedback
-        self.get_logger().debug(f"Received feedback: {feedback}")
-        self._actions_cache.add_feedback(uid, feedback)
 
 
 def describe_ros_image(
@@ -622,30 +455,25 @@ if __name__ == "__main__":
         "/wait",
     ]
 
-    SYSTEM_PROMPT = "You are an autonomous agent. Your main goal is to fulfill the user's requests. "
+    SYSTEM_PROMPT = "You are an autonomous robot connected to ros2 environment. Your main goal is to fulfill the user's requests. "
     "Do not make assumptions about the environment you are currently in. "
     "Use the tooling provided to gather information about the environment."
-    "Status of actions is delivered in the state - no need to run specific tools for it"
+    "You can use ros2 topics, services and actions to operate."
 
-    action_node = BasicNavigator()
     node = RaiNode(
         llm=ChatOpenAI(model="gpt-4o-mini"),
         observe_topics=observe_topics,
         observe_postprocessors=observe_postprocessors,
         whitelist=topics_whitelist + actions_whitelist,
         system_prompt=SYSTEM_PROMPT,
-        action_node=action_node,
     )
 
     tools = [
         wait_for_2s,
         GetMsgFromTopic(node=node),
-        # Ros2GetTopicsNamesAndTypesTool(node=node),
-        # Ros2GetActionNamesAndTypesTool(node=node),
-        Ros2GetRobotInterfaces(node=node),
-        Ros2CancelAction(node=node),
-        Ros2RunAction(node=node),
+        Ros2RunActionSync(node=node),
         GetCameraImage(node=node),
+        Ros2ShowMsgInterfaceTool(),
     ]
 
     state_retriever = node.get_robot_state
