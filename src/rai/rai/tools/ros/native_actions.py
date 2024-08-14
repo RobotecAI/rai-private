@@ -57,7 +57,7 @@ class Ros2GetActionNamesAndTypesTool(Ros2BaseTool):
 
 
 class Ros2RunAction(Ros2BaseTool):
-    name: str = "Ros2ActionRunner"
+    name: str = "Ros2RunAction"
     description: str = "A tool for running a ros2 action"
 
     args_schema: Type[Ros2ActionRunnerInput] = Ros2ActionRunnerInput
@@ -83,15 +83,19 @@ class Ros2RunAction(Ros2BaseTool):
     def _run(
         self, action_name: str, action_type: str, action_goal_args: Dict[str, Any]
     ):
+        node = self.node
         try:
             goal_msg, msg_cls = self._build_msg(action_type, action_goal_args)
         except Exception as e:
             return f"Failed to build message: {e}"
 
-        client = ActionClient(
-            self.node, msg_cls, action_name, callback_group=self.node.callback_group
-        )
-        client.wait_for_server()
+        client = ActionClient(node, msg_cls, action_name)
+
+        while not client.wait_for_server(timeout_sec=1.0):
+            self.node.get_logger().info(
+                f"'{action_name}' action server not available, waiting..."
+            )
+
         uid = str(uuid.uuid4())
         future = client.send_goal_async(
             goal_msg,

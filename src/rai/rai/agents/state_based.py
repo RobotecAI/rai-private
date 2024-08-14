@@ -115,6 +115,7 @@ class ToolRunner(RunnableCallable):
 
             try:
                 output = self.tools_by_name[call["name"]].invoke(call, config)  # type: ignore
+                self.logger.info("Tool output: " + str(output))
             except ValidationError as e:
                 self.logger.info(
                     f'Args validation error in "{call["name"]}", error: {e}'
@@ -269,13 +270,13 @@ def create_state_based_agent(
         "state_retriever", partial(retriever_wrapper, state_retriever, _logger)
     )
     workflow.add_node("tools", tool_node)
-    workflow.add_node("thinker", partial(thinker, llm, _logger))
+    # workflow.add_node("thinker", partial(thinker, llm, _logger))
     workflow.add_node("decider", partial(decider, llm_with_tools, _logger))
     workflow.add_node("reporter", partial(reporter, llm, _logger))
 
     workflow.add_edge(START, "state_retriever")
-    workflow.add_edge("state_retriever", "thinker")
-    workflow.add_edge("thinker", "decider")
+    workflow.add_edge("state_retriever", "decider")
+    # workflow.add_edge("thinker", "decider")
     workflow.add_edge("tools", "state_retriever")
     workflow.add_edge("reporter", END)
     workflow.add_conditional_edges(

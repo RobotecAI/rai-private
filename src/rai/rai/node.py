@@ -31,13 +31,22 @@ import rclpy.subscription
 import rclpy.task
 import sensor_msgs.msg
 import std_msgs.msg
+from action_msgs.msg import GoalStatus
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
+from nav2_simple_commander.robot_navigator import BasicNavigator
 from rclpy.action.graph import get_action_names_and_types
 from rclpy.node import Node
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    LivelinessPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
 from rclpy.wait_for_message import wait_for_message
 from std_srvs.srv import Trigger
 
@@ -83,10 +92,11 @@ class RaiActionStoreRecord:
 
 
 class RaiActionStore(RaiActionStoreInterface):
-    def __init__(self) -> None:
+    def __init__(self, node) -> None:
         self._actions: Dict[str, RaiActionStoreRecord] = dict()
         self._results: Dict[str, Any] = dict()
         self._feedbacks: Dict[str, List[Any]] = dict()
+        self.node = node
 
     def register_action(
         self,
@@ -107,6 +117,9 @@ class RaiActionStore(RaiActionStoreInterface):
 
     def add_feedback(self, uid: str, feedback: Any):
         if uid not in self._feedbacks:
+            logging.getLogger().warning(
+                "Received feedback for actions that don't exist"
+            )
             return  # TODO(boczekbartek): fix
         self._feedbacks[uid].append(feedback)
 
@@ -145,10 +158,25 @@ class RaiActionStore(RaiActionStoreInterface):
             if uid not in self._actions:
                 raise KeyError(f"Unknown action: {uid=}")
             action = self._actions[uid]
-            done = action.result_future.done()
-            logging.getLogger().debug(f"Action(uid={uid}) done: {done}")
-            if done:
-                results[uid] = action.result_future.result()
+            self.node.get_logger().info("spin")
+            rclpy.spin_until_future_complete(
+                self.node, action.result_future, timeout_sec=0.1
+            )
+            if action.result_future.result():
+                status = action.result_future.result().status
+                if status == GoalStatus.STATUS_SUCCEEDED:
+                    logging.getLogger().info(f"Action(uid={uid}) succeeded")
+                    res = "Action succeeded"
+                elif status == GoalStatus.STATUS_ABORTED:
+                    logging.getLogger().info(f"Action(uid={uid}) aborted")
+                    res = "Action aborted"
+                elif status == GoalStatus.STATUS_CANCELED:
+                    logging.getLogger().info(f"Action(uid={uid}) canceled")
+                    res = "Action canceled"
+                else:
+                    logging.getLogger().info(f"Action(uid={uid}) failed")
+                    res = "Action failed"
+                results[uid] = res
                 done_actions.append(uid)
             else:
                 results[uid] = "Not done yet"
@@ -278,7 +306,7 @@ class RaiBaseNode(Node):
         self.DISCOVERY_FREQ = 2.0
         self.DISCOVERY_DEPTH = 5
 
-        self.callback_group = rclpy.callback_groups.ReentrantCallbackGroup()
+        self.callback_group = rclpy.callback_groups.MutuallyExclusiveCallbackGroup()
         self.timer = self.create_timer(
             self.DISCOVERY_FREQ,
             self.discovery,
@@ -287,7 +315,13 @@ class RaiBaseNode(Node):
         self.ros_discovery_info = NodeDiscovery(whitelist=self.whitelist)
         self.discovery()
 
-        self.qos_profile = rclpy.qos.qos_profile_best_available
+        self.qos_profile = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            liveliness=LivelinessPolicy.AUTOMATIC,
+        )
 
         self.state_subscribers = dict()
         self.initialize_robot_state_interfaces(self.state_topics)
@@ -375,7 +409,6 @@ class RaiBaseNode(Node):
         raise KeyError(f"Topic {topic} not found")
 
     def generic_state_subscriber_callback(self, topic_name: str, msg: Any):
-        self.get_logger().info(f"Received message from topic: {topic_name}")
         self.robot_state[topic_name] = msg
 
     def initialize_robot_state_interfaces(self, topics):
@@ -402,7 +435,7 @@ class RaiNode(RaiBaseNode):
         self,
         system_prompt: str,
         llm,
-        observe_preprocessors: Optional[Dict[str, Callable]] = None,
+        action_node,
         observe_topics: Optional[List[str]] = None,
         observe_postprocessors: Optional[Dict[str, Callable]] = None,
         whitelist: Optional[List[str]] = None,
@@ -419,7 +452,8 @@ class RaiNode(RaiBaseNode):
             *args,
             **kwargs,
         )
-        self._actions_cache = RaiActionStore()
+        self.action_node = action_node
+        self._actions_cache = RaiActionStore(self.action_node)
 
         # ---------- ROS Parameters ----------
         self.task_topic = "/task_addition_requests"
@@ -447,21 +481,21 @@ class RaiNode(RaiBaseNode):
             std_msgs.msg.String,
             self.task_topic,
             callback=self.task_callback,
-            callback_group=self.callback_group,
+            # callback_group=self.callback_group,
             qos_profile=self.qos_profile,
         )
 
     def get_robot_state(self) -> Dict[str, str]:
         state_dict = dict()
-        for t in self.state_subscribers:
-            if t not in self.robot_state:
-                msg = "No message yet"
-                state_dict[t] = msg
-                continue
-            msg = self.robot_state[t]
-            if t in self.state_postprocessors:
-                msg = self.state_postprocessors[t](msg)
-            state_dict[t] = msg
+        # for t in self.state_subscribers:
+        #     if t not in self.robot_state:
+        #         msg = "No message yet"
+        #         state_dict[t] = msg
+        #         continue
+        #     msg = self.robot_state[t]
+        #     if t in self.state_postprocessors:
+        #         msg = self.state_postprocessors[t](msg)
+        #     state_dict[t] = msg
 
         state_dict.update(
             {
@@ -493,7 +527,22 @@ class RaiNode(RaiBaseNode):
         report = pformat(report.json())
         self.get_logger().info(f"Finished task:\n{report}")
 
-        self.clear_state()
+        # import ipdb; ipdb.set_trace()
+        # BasicNavigator
+        #
+        # nav = self.action_node
+        # nav.spin(1.57, 5)
+        # while not nav.isTaskComplete():
+        #     feedback = nav.getFeedback()
+        #     self.get_logger().info(f"Feedback: {feedback}")
+        #
+        # result = nav.getResult()
+        # if result == TaskResult.SUCCEEDED:
+        #     self.get_logger().info('Goal succeeded!')
+        # elif result == TaskResult.CANCELED:
+        #     self.get_logger().info('Goal was canceled!')
+        # elif result == TaskResult.FAILED:
+        #     self.get_logger().info('Goal failed!')
 
     def clear_state(self):
         self._actions_cache.clear()
@@ -572,16 +621,20 @@ if __name__ == "__main__":
         "/undock_robot",
         "/wait",
     ]
+
     SYSTEM_PROMPT = "You are an autonomous agent. Your main goal is to fulfill the user's requests. "
     "Do not make assumptions about the environment you are currently in. "
     "Use the tooling provided to gather information about the environment."
+    "Status of actions is delivered in the state - no need to run specific tools for it"
 
+    action_node = BasicNavigator()
     node = RaiNode(
         llm=ChatOpenAI(model="gpt-4o-mini"),
         observe_topics=observe_topics,
         observe_postprocessors=observe_postprocessors,
         whitelist=topics_whitelist + actions_whitelist,
         system_prompt=SYSTEM_PROMPT,
+        action_node=action_node,
     )
 
     tools = [
@@ -608,5 +661,6 @@ if __name__ == "__main__":
 
     executor = rclpy.executors.MultiThreadedExecutor()
     executor.add_node(node)
+    # executor.add_node(action_node)
     executor.spin()
     rclpy.shutdown()
