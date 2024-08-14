@@ -14,10 +14,8 @@
 #
 
 import datetime
-import json
 import logging
 import os
-from pprint import pformat
 from typing import Callable, List, Literal, Sequence, Union, cast
 
 import coloredlogs
@@ -33,19 +31,17 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
 from langfuse.callback import CallbackHandler
 from redis import Redis
 
 from rai.history_saver import HistorySaver
+from rai.node import RaiNode
 from rai.scenario_engine.messages import (
     AgentLoop,
     FutureAiMessage,
     HumanMultimodalMessage,
 )
 from rai.scenario_engine.tool_runner import run_requested_tools
-from rai.tools.ros.native_actions import Ros2CheckActionResults, Ros2ListActionFeedbacks
-from rai.tools.ros.tools import GetCameraImageTool
 
 __all__ = [
     "ScenarioRunner",
@@ -89,23 +85,6 @@ ScenarioPartType = Union[
 ScenarioType = Sequence[ScenarioPartType]
 
 
-def get_current_image() -> str:
-    """Use this tool to get an image from a camera topic"""
-    topic = "/camera/camera/color/image_raw"
-    try:
-        llm = ChatOpenAI(model="gpt-4o-mini", streaming=True)
-        output = GetCameraImageTool()._run(topic=topic)
-        images = output["images"]
-        msg = HumanMultimodalMessage(
-            content="Please describe the image in 2 sentences max 150 chars.",
-            images=images,
-            name="tool",
-        )
-        return llm.invoke([msg]).content
-    except Exception as e:
-        return f"Error: {e}. Make sure the camera topic is correct."
-
-
 class ScenarioRunner:
     """
     The ScenarioRunner class is responsible for running a given scenario. It iterates over the scenario and executes the
@@ -127,14 +106,13 @@ class ScenarioRunner:
         self,
         scenario: ScenarioType,
         llm: BaseChatModel,
-        ros_node,
+        ros_node: RaiNode,
         llm_type: Literal["openai", "bedrock"],
         scenario_name: str = "",
         logging_level: int = logging.WARNING,
         log_usage: bool = True,
         use_cache: bool = True,
         ros_spin_time: int = 1,
-        history=None,
     ):
         self.ros_node = ros_node
 
@@ -149,10 +127,7 @@ class ScenarioRunner:
         self.logging_level = logging_level
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(self.logging_level)
-        if history is not None:
-            self.history = history
-        else:
-            self.history: List[BaseMessage] = []
+        self.history: List[BaseMessage] = []
         now = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
         self.logs_dir = os.path.join("logs", self.llm.__class__.__name__ + now)
         self.use_cache = use_cache
@@ -182,7 +157,7 @@ class ScenarioRunner:
                 trace_name=scenario_name or "unknown scenario",
                 tags=["scenario_runner"],
             )
-            self.invoke_config["callbacks"] = []
+            self.invoke_config["callbacks"] = [self.langfuse_handler]
 
     def run(self):
         self.logger.info("Starting conversation.")
@@ -220,39 +195,17 @@ class ScenarioRunner:
                 self.logger.info(
                     f"looping agent actions until {msg.stop_tool}. max {msg.stop_iters} loops."
                 )
-
                 llm_with_tools = self.llm.bind_tools(msg.tools)
                 for _ in range(msg.stop_iters):
-                    self.save_to_html()
-                    if len(self.history) >= 1:
-                        self.logger.info(f"{self.history[-1].content}")
                     # if the last message is from the AI, we need to add a human message to continue the agent loop
                     # otherwise the bedrock model will not be able to continue the conversation
                     self.ros_spin()
                     if self.history[-1].type == "ai":
                         self.history.append(
                             HumanMessage(
-                                content="Thank you. Please contiune the task of finish"
+                                content="Thank you. Please continue your mision using tools."
                             )
                         )
-
-                    data = {
-                        # 'registered_actions' : Ros2GetRegisteredActions(node=self.ros_node)._run(),
-                        "action_results": Ros2CheckActionResults(
-                            node=self.ros_node
-                        )._run(),
-                        "action_feedbacks": Ros2ListActionFeedbacks(
-                            node=self.ros_node
-                        )._run(),
-                        "short_camera_image_summary": get_current_image(),
-                        "rosout summary": self.ros_node.summarize_logs(),
-                    }
-                    state_msg = f"=== Robot state === \n {json.dumps(data)}"
-
-                    self.logger.info(pformat(state_msg))
-
-                    self.history.append(HumanMessage(content=state_msg))
-
                     ai_msg = cast(
                         AIMessage,
                         llm_with_tools.invoke(self.history, config=self.invoke_config),

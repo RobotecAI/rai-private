@@ -63,10 +63,7 @@ def run_tool_call(
         logger.warning(err_msg)
         return err_msg
 
-    if isinstance(tool_output, str):
-        logger.info(
-            f"Successfully ran tool: {selected_tool.name}. Output: {tool_output}"
-        )
+    logger.info(f"Successfully ran tool: {selected_tool.name}. Output: {tool_output}")
     return tool_output
 
 
