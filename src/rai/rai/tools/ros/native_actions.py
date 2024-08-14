@@ -13,16 +13,14 @@
 # limitations under the License.
 #
 
-import functools
 import uuid
 from typing import Any, Dict, Optional, Tuple, Type
 
-import rclpy
 import rosidl_runtime_py.set_message
 import rosidl_runtime_py.utilities
+from action_msgs.msg import GoalStatus
 from langchain_core.pydantic_v1 import BaseModel, Field
 from rclpy.action import ActionClient
-from rclpy.action.client import ClientGoalHandle
 
 from .native import Ros2BaseTool
 
@@ -97,25 +95,21 @@ class Ros2RunAction(Ros2BaseTool):
             )
 
         uid = str(uuid.uuid4())
-        future = client.send_goal_async(
-            goal_msg,
-            feedback_callback=functools.partial(self.node.feedback_callback, uid),
-        )
-        rclpy.spin_until_future_complete(self.node, future)
-        # Calllback names follow official ros2 actions tutorial
-        goal_handle: ClientGoalHandle = future.result()  # type: ignore
-        if not goal_handle.accepted:
-            self.node.get_actions_cache().add_result(uid, "Action rejected")
-            return "Goal rejected"
-
-        self.node.get_logger().info("Goal accepted")
-        get_result_future = goal_handle.get_result_async()
-        self.node.get_actions_cache().register_action(
-            uid, action_name, action_type, action_goal_args, get_result_future
-        )
-
-        self.node.get_logger().info(f"Action submitted {goal_msg=}")
-        return f"Action call uid: {uid}"  # TODO(boczekbartek): maybe refactor to langchain tool call id
+        result = client.send_goal(goal_msg)
+        status = result.status
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            node.get_logger().info(f"Action(uid={uid}) succeeded")
+            res = "Action succeeded"
+        elif status == GoalStatus.STATUS_ABORTED:
+            node.get_logger().info(f"Action(uid={uid}) aborted")
+            res = "Action aborted"
+        elif status == GoalStatus.STATUS_CANCELED:
+            node.get_logger().info(f"Action(uid={uid}) canceled")
+            res = "Action canceled"
+        else:
+            node.get_logger().info(f"Action(uid={uid}) failed")
+            res = "Action failed"
+        return res
 
 
 class Ros2GetRegisteredActions(Ros2BaseTool):
