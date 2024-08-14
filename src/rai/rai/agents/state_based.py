@@ -222,9 +222,23 @@ def reporter(llm: BaseChatModel, logger: loggers_type, state: State):
         "You are the reporter. Your task is to summarize what happened previously. "
         "Make sure to mention the problem, solution and the outcome. Prepare clear response to the user."
     )
-    ai_msg = llm.with_structured_output(Report).invoke(
-        [SystemMessage(content=prompt)] + state["messages"]
-    )
+    n_tries = 5
+    ai_msg = None
+    for i in range(n_tries):
+        try:
+            ai_msg = llm.with_structured_output(Report).invoke(
+                [SystemMessage(content=prompt)] + state["messages"]
+            )
+            break
+        except ValidationError:
+            logger.info(
+                f"Failed to summarize using given template. Repeating: {i}/{n_tries}"
+            )
+
+    if ai_msg is None:
+        logger.info("Failed to summarize. Trying without template")
+        ai_msg = llm.invoke([SystemMessage(content=prompt)] + state["messages"])
+
     state["messages"].append(ai_msg)
     return state
 
