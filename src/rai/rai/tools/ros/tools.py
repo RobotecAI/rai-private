@@ -32,6 +32,8 @@ from rai.communication.ros_communication import (
     TF2TransformFetcher,
 )
 
+from .native import TopicInput
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,12 +97,6 @@ class AddDescribedWaypointToDatabaseTool(BaseTool):
             json.dump(map_database, file, indent=2)
 
 
-class GetOccupancyGridToolInput(BaseModel):
-    """Input for the get_current_map tool."""
-
-    # topic: str = Field(..., description="Ros2 occupancy grid topic to subscribe to")
-
-
 class GetOccupancyGridTool(BaseTool):
     """Get the current map as an image with the robot's position marked on it (red dot)."""
 
@@ -109,7 +105,7 @@ class GetOccupancyGridTool(BaseTool):
         "A tool for getting the current map as an image with the robot's position marked on it."
     )
 
-    args_schema: Type[GetOccupancyGridToolInput] = GetOccupancyGridToolInput
+    args_schema: Type[TopicInput] = TopicInput
 
     image_width: int = 1500
     debug: bool = False
@@ -226,10 +222,9 @@ class GetOccupancyGridTool(BaseTool):
             cv2.imwrite("map.png", image)
         return base64.b64encode(buffer.tobytes()).decode("utf-8")
 
-    def _run(self):
+    def _run(self, topic_name: str):
         """Gets the current map from the specified topic."""
-        topic = "/map"
-        map_grabber = SingleMessageGrabber(topic, OccupancyGrid, timeout_sec=10)
+        map_grabber = SingleMessageGrabber(topic_name, OccupancyGrid, timeout_sec=10)
         tf_grabber = TF2TransformFetcher()
 
         map_msg = map_grabber.get_data()

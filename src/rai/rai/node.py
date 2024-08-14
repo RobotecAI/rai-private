@@ -49,6 +49,7 @@ from rclpy.wait_for_message import wait_for_message
 from std_srvs.srv import Trigger
 
 from rai.agents.state_based import State, create_state_based_agent
+from rai.rai.tools.ros.tools import GetOccupancyGridTool
 from rai.scenario_engine.messages import HumanMultimodalMessage
 from rai.tools.ros.native import (
     GetCameraImage,
@@ -474,6 +475,7 @@ if __name__ == "__main__":
         Ros2RunActionSync(node=node),
         GetCameraImage(node=node),
         Ros2ShowMsgInterfaceTool(),
+        GetOccupancyGridTool(),
     ]
 
     state_retriever = node.get_robot_state
