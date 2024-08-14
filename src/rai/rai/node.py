@@ -346,7 +346,7 @@ class RaiNode(RaiBaseNode):
                 time.sleep(0.1)
                 continue
             data = self.task_queue.get()
-            self.get_logger().info(f"Agent loop received task: {data}")
+            self.get_logger().info(f"Agent loop consuming task: {data}")
 
             messages = [
                 SystemMessage(content=self.system_prompt),

@@ -13,7 +13,6 @@
 # limitations under the License.
 #
 
-import uuid
 from typing import Any, Dict, Optional, Tuple, Type
 
 import rosidl_runtime_py.set_message
@@ -95,8 +94,6 @@ class Ros2RunActionSync(Ros2BaseTool):
                 f"'{action_name}' action server not available, waiting..."
             )
 
-        uid = str(uuid.uuid4())
-
         self.node.get_logger().info(f"Sending action message: {goal_msg}")
         result = client.send_goal(goal_msg)
         self.node.get_logger().info("Action finished and result received!")
@@ -107,17 +104,15 @@ class Ros2RunActionSync(Ros2BaseTool):
             status = GoalStatus.STATUS_UNKNOWN
 
         if status == GoalStatus.STATUS_SUCCEEDED:
-            self.node.get_logger().info(f"Action(uid={uid}) succeeded")
-            res = "Action succeeded"
+            res = f"Action succeeded, {result.result}"
         elif status == GoalStatus.STATUS_ABORTED:
-            self.node.get_logger().info(f"Action(uid={uid}) aborted")
-            res = "Action aborted"
+            res = f"Action aborted, {result.result}"
         elif status == GoalStatus.STATUS_CANCELED:
-            self.node.get_logger().info(f"Action(uid={uid}) canceled")
-            res = "Action canceled"
+            res = f"Action canceled: {result.result}"
         else:
-            self.node.get_logger().info(f"Action(uid={uid}) failed")
             res = "Action failed"
+
+        self.node.get_logger().info(res)
         return res
 
 

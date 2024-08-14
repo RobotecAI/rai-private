@@ -53,12 +53,10 @@ if "memory" not in st.session_state:
 
 
 class HMINode(RaiBaseNode):
-    def __init__(self, robot_description_package: str):
-        super().__init__("rai_hmi_node")
+    def __init__(self, robot_description_package: str, system_prompt: str, llm):
+        super().__init__("rai_hmi_node", system_prompt, llm)
         self.robot_description_package = robot_description_package
         self.status_publisher = self.create_publisher(String, "hmi_status", 10)  # type: ignore self.task_addition_request_publisher = self.create_publisher(
-            String, "task_addition_requests", 10
-        )
 
         self.documentation_service = self.create_client(
             VectorStoreRetrieval,
@@ -78,7 +76,7 @@ class HMINode(RaiBaseNode):
 
 
 @st.cache_resource
-def initialize_ros(robot_description_package: str):
+def initialize_ros(robot_description_package: str, llm):
 
     rclpy.init()
     SYSTEM_PROMPT = """You are a helpful assistant. You converse with users.
@@ -89,7 +87,11 @@ def initialize_ros(robot_description_package: str):
         Do not ever guess the topic name. If you don't know the topic, use the available tools to find it."""
 
     if package_name is not None:
-        hmi_node = HMINode(robot_description_package=robot_description_package, system_prompt=SYSTEM_PROMPT)
+        hmi_node = HMINode(
+            robot_description_package=robot_description_package,
+            system_prompt=SYSTEM_PROMPT,
+            llm=llm,
+        )
         thread = Thread(target=rclpy.spin, args=(hmi_node,), daemon=True)
         thread.start()
         system_prompt = hmi_node.initialize_system_prompt()
@@ -164,7 +166,7 @@ def initialize_genAI(_node: HMINode):
     return agent, state
 
 
-hmi_node = initialize_ros(sys.argv[1])
+hmi_node = initialize_ros(sys.argv[1], llm)
 faiss_index = hmi_node.faiss_index
 agent_executor, state = initialize_genAI(_node=hmi_node)
 
