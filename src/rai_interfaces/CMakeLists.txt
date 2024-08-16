@@ -21,6 +21,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StringList.srv"
   "msg/RAIDetectionArray.msg"
   "srv/RAIGroundingDino.srv"
+  "srv/Feedback.srv"
   DEPENDENCIES std_msgs vision_msgs sensor_msgs
 )
 
