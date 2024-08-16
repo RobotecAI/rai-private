@@ -41,13 +41,7 @@ class QueryDatabaseTool(BaseTool):
 
     def _run(self, query: str):
         retrieval_response = self.get_response(query)
-        output = [
-            (document, score)
-            for document, score in zip(
-                retrieval_response.documents, retrieval_response.scores
-            )
-        ]
-        return output
+        return str(retrieval_response)
 
 
 class QueueTaskInput(BaseModel):

@@ -35,6 +35,7 @@ setup(
     entry_points={
         "console_scripts": [
             "hmi_node = rai_hmi.hmi_node:main",
+            "voice_hmi_node = rai_hmi.voice_hmi:main",
         ],
     },
 )
