@@ -126,6 +126,7 @@ class ToolRunner(RunnableCallable):
                     content=f"Failed to run tool. Error: {e}",
                     name=call["name"],
                     tool_call_id=call["id"],
+                    status="error",
                 )
             except Exception as e:
                 self.logger.info(f'Error in "{call["name"]}", error: {e}')
@@ -133,6 +134,7 @@ class ToolRunner(RunnableCallable):
                     content=f"Failed to run tool. Error: {e}",
                     name=call["name"],
                     tool_call_id=call["id"],
+                    status="error",
                 )
 
             if output.artifact is not None:

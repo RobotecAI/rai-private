@@ -13,7 +13,6 @@
 # limitations under the License.
 #
 
-from abc import abstractmethod
 from enum import Enum
 from typing import List, Optional, Tuple, cast
 
@@ -23,13 +22,11 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.tools import BaseTool
 from langchain_openai import OpenAIEmbeddings
-from rclpy.node import Node
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from rai_hmi.task import Task
+from rai_hmi.action_handler_mixin import TaskActionMixin
 from rai_hmi.tools import QueryDatabaseTool, QueueTaskTool
-from rai_interfaces.srv import Feedback
 
 
 class HMIStatus(Enum):
@@ -37,7 +34,7 @@ class HMIStatus(Enum):
     PROCESSING = "processing"
 
 
-class BaseHMINode(Node):
+class BaseHMINode(TaskActionMixin):
     """
     Base class for Human-Machine Interface (HMI) nodes in a robotic system.
 
@@ -60,18 +57,21 @@ class BaseHMINode(Node):
         _load_documentation: Loads the FAISS index from the robot description package.
     """
 
-    def __init__(self, node_name: str):
+    def __init__(self, node_name: str, robot_description_package: Optional[str] = None):
         super().__init__(node_name=node_name)
 
-        self.declare_parameter("robot_description_package", "")
-        self.robot_description_package = cast(
-            str,
-            (
-                self.get_parameter("robot_description_package")
-                .get_parameter_value()
-                .string_value
-            ),  # type: ignore
-        )
+        if robot_description_package is None:
+            self.declare_parameter("robot_description_package", "")
+            self.robot_description_package = cast(
+                str,
+                (
+                    self.get_parameter("robot_description_package")
+                    .get_parameter_value()
+                    .string_value
+                ),  # type: ignore
+            )
+        else:
+            self.robot_description_package = robot_description_package
 
         self.processing = False
 
@@ -90,15 +90,12 @@ class BaseHMINode(Node):
             Trigger, "rai_whoami_identity_service"
         )
 
-        self.feedback_service = self.create_service(
-            Feedback, "feedback_request", self.feedback_request_callback
-        )
-
         self.agent = None
         # order of the initialization is important
         self.system_prompt = self._initialize_system_prompt()
         self.faiss_index = self._load_documentation()
         self.tools = self._initialize_available_tools()
+        self.initialize_task_action_client_and_server()
 
         self.get_logger().info("HMI Node has been started")
 
@@ -121,22 +118,6 @@ class BaseHMINode(Node):
     ) -> List[Tuple[Document, float]]:
         output = self.faiss_index.similarity_search_with_score(query, k)
         return output
-
-    @abstractmethod
-    def handle_feedback_request(self, feedback_query: str) -> str:
-        """Abstract method to handle feedback requests."""
-
-    def feedback_request_callback(
-        self, request: Feedback.Request, response: Feedback.Response
-    ):
-        """Callback method for the feedback service."""
-        feedback_query = request.query
-        self.get_logger().info(f"Received feedback request: {feedback_query}")
-
-        feedback_response = self.handle_feedback_request(feedback_query)
-
-        response.response = feedback_response
-        return response
 
     def _initialize_system_prompt(self):
         while not self.constitution_service.wait_for_service(timeout_sec=1.0):
@@ -194,9 +175,3 @@ class BaseHMINode(Node):
             )
             return None
         return faiss_index
-
-    def add_task_to_queue(self, task: Task):
-        """Publishes a task to be handled by the rai node."""
-        msg = String()
-        msg.data = task.json()
-        self.task_addition_request_publisher.publish(msg)
