@@ -18,12 +18,14 @@ from typing import List
 import rclpy
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.prompts import ChatPromptTemplate
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from rclpy.action.server import ServerGoalHandle
 from rclpy.callback_groups import ReentrantCallbackGroup
 from std_msgs.msg import String
 
 from rai_hmi.base import BaseHMINode
+from rai_interfaces.action import TaskFeedback
 
 
 class VoiceHMINode(BaseHMINode):
@@ -76,25 +78,26 @@ class VoiceHMINode(BaseHMINode):
         self.hmi_publisher.publish(String(data=output))
         self.processing = False
 
-    def handle_feedback_request(self, feedback_query: str) -> str:
-        self.processing = True
+    # TODO: Implement
+    def handle_task_feedback_request(self, goal_handle: ServerGoalHandle):
 
-        # handle feedback request
-        feedback_prompt = (
-            "The task executioner is asking for feedback on the following:"
-            f"```\n{feedback_query}\n```"
-            "Please provide needed information based on the following chat history:"
-        )
-        local_history: List[BaseMessage] = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=feedback_prompt),
-        ]
-        local_history.extend(self.history)
-        response = self.agent.invoke({"user_input": "", "chat_history": local_history})
-        output = response["output"]
+        # Extract goal data
+        goal: TaskFeedback.Goal = goal_handle.request
+        goal  # type: ignore
 
-        self.processing = False
-        return output
+        # Handle the goal.current_task and goal.issue_description
+        for _ in range(10):
+            goal_handle.publish_feedback(
+                TaskFeedback.Feedback(feedback="Processing...")
+            )
+
+        goal_handle.succeed()
+        # Create and return a result
+        result = TaskFeedback.Result()
+        result.informations = "Do this and that..."
+        result.success = True
+
+        return result
 
 
 def main(args=None):

@@ -1,0 +1,12 @@
+# Goal
+string task
+string description
+string priority
+
+---
+# Result
+bool success
+
+---
+# Feedback
+string current_status
