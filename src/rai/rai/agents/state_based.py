@@ -14,6 +14,7 @@
 #
 
 import logging
+import pickle
 import time
 from functools import partial
 from typing import (
@@ -78,6 +79,25 @@ class Report(BaseModel):
     response_to_user: str = Field(
         ..., title="Response", description="The response to the user"
     )
+
+
+def get_stored_artifacts(tool_call_id: str) -> List[Any]:
+    with open("artifact_database.pkl", "rb") as file:
+        artifact_database = pickle.load(file)
+        if tool_call_id in artifact_database:
+            return artifact_database[tool_call_id]
+    return []
+
+
+def store_artifacts(tool_call_id: str, artifacts: List[Any]):
+    with open("artifact_database.pkl", "rb") as file:
+        artifact_database = pickle.load(file)
+        if tool_call_id not in artifact_database:
+            artifact_database[tool_call_id] = artifacts
+        else:
+            artifact_database[tool_call_id].extend(artifacts)
+    with open("artifact_database.pkl", "wb") as file:
+        pickle.dump(artifact_database, file)
 
 
 class ToolRunner(RunnableCallable):
@@ -145,6 +165,7 @@ class ToolRunner(RunnableCallable):
                     )
 
                 artifact = cast(MultimodalArtifact, artifact)
+                store_artifacts(output.tool_call_id, [artifact])
 
             if artifact is not None:  # multimodal case
                 return ToolMultimodalMessage(
@@ -162,7 +183,9 @@ class ToolRunner(RunnableCallable):
             outputs: List[Any] = []
             for raw_output in raw_outputs:
                 if isinstance(raw_output, ToolMultimodalMessage):
-                    outputs.extend(raw_output.postprocess())
+                    outputs.extend(
+                        raw_output.postprocess()
+                    )  # openai please allow tool messages with images!
                 else:
                     outputs.append(raw_output)
 
