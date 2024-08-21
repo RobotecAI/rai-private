@@ -58,6 +58,10 @@ class MultimodalMessage(BaseMessage):
             _content.extend(_image_content)
         self.content = _content
 
+    @property
+    def text(self) -> str:
+        return self.content[0]["text"]
+
 
 class HumanMultimodalMessage(HumanMessage, MultimodalMessage):
     def __repr_args__(self) -> Any:
@@ -104,6 +108,7 @@ class ToolMultimodalMessage(ToolMessage, MultimodalMessage):
             human_message = HumanMultimodalMessage(
                 content=f"Image returned by a tool call {self.tool_call_id}",
                 images=self.images,
+                tool_call_id=self.tool_call_id,
             )
             # at this point self.content is a list of dicts
             # we need to extract the text from each dict
