@@ -31,11 +31,12 @@ from langchain_core.messages import (
 from langchain_openai.chat_models import ChatOpenAI
 from PIL import Image
 
+from rai.agents.conversational_agent import create_conversational_agent
 from rai.agents.state_based import get_stored_artifacts
 from rai.messages import HumanMultimodalMessage
 from rai.node import RaiBaseNode
 from rai.tools.ros.native import GetCameraImage, Ros2GetTopicsNamesAndTypesTool
-from rai_hmi.agent import create_conversational_agent
+from rai.tools.ros.nav2.basic_navigator import backup, drive_on_heading, spin
 from rai_hmi.base import BaseHMINode
 
 logger = logging.getLogger(__name__)
@@ -74,11 +75,17 @@ def decode_base64_into_image(base64_image: str):
 def initialize_agent(_node: BaseHMINode):
     llm = ChatOpenAI(
         temperature=0.5,
-        model="gpt-4o-mini",
+        model="gpt-4o",
         streaming=True,
     )
     rai_node = RaiBaseNode(node_name="__rai_node__")  # this is so wrong
-    tools = [Ros2GetTopicsNamesAndTypesTool(node=_node), GetCameraImage(node=rai_node)]
+    tools = [
+        Ros2GetTopicsNamesAndTypesTool(node=_node),
+        GetCameraImage(node=rai_node),
+        drive_on_heading,
+        spin,
+        backup,
+    ]
     agent = create_conversational_agent(
         llm, _node.tools + tools, _node.system_prompt, logger=_node.get_logger()
     )
