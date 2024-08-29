@@ -23,6 +23,11 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument(
+                "recording_device",
+                default_value="0",
+                description="Microphone device number. See available by running python -c 'import sounddevice as sd; print(sd.query_devices())'",
+            ),
+            DeclareLaunchArgument(
                 "language",
                 default_value="en",
                 description="Language code for the ASR model",

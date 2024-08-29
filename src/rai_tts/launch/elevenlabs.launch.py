@@ -17,7 +17,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -26,19 +27,35 @@ def generate_launch_description():
     config = os.path.join(
         get_package_share_directory("rai_tts"), "config", "elevenlabs.yaml"
     )
-    print(config)
-    return LaunchDescription(
-        [
-            DeclareLaunchArgument(
-                "config_file",
-                default_value=config,
-                description="Path to the config file",
-            ),
-            Node(
-                package="rai_tts",
-                executable="tts_node",
-                name="tts_node",
-                parameters=[LaunchConfiguration("config_file")],
-            ),
-        ]
-    )
+    launch_configuration = [
+        DeclareLaunchArgument(
+            "config_file",
+            default_value=config,
+            description="Path to the config file",
+        ),
+        Node(
+            package="rai_tts",
+            executable="tts_node",
+            name="tts_node",
+            parameters=[LaunchConfiguration("config_file")],
+        ),
+        ExecuteProcess(
+            cmd=[
+                "ffplay",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=432",
+                "-af",
+                "volume=0.01",
+                "-nodisp",
+                "-v",
+                "0",
+            ],
+            name="ffplay_sine_wave",
+            output="screen",
+            condition=IfCondition(LaunchConfiguration("keep_speaker_busy")),
+        ),
+    ]
+
+    return LaunchDescription(launch_configuration)

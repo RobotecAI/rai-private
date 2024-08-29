@@ -30,5 +30,13 @@ Package with launch files.
 ### Human - Robot interface via voice
 
 ```
-ros2 launch rai_bringup hri.launch.py  tts_vendor:=(opentts|elevenlabs) robot_package_description:=(robot_whoami_package)
+ros2 launch rai_bringup hri.launch.py  tts_vendor:=(opentts|elevenlabs) robot_package_description:=(robot_whoami_package) recording_device:=0 keep_speaker_busy:=(true|false)
 ```
+
+recording_device: The device you want to record with. Check available with:
+
+```bash
+python -c 'import sounddevice as sd; print(sd.query_devices())'
+```
+
+keep_speaker_busy: some speaker may go into low power mode, which may result in truncated speech beginnings. Set to true to play low frequency, low volume noise.

@@ -17,7 +17,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -39,6 +40,23 @@ def generate_launch_description():
                 executable="tts_node",
                 name="tts_node",
                 parameters=[LaunchConfiguration("config_file")],
+            ),
+            ExecuteProcess(
+                cmd=[
+                    "ffplay",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=432",
+                    "-af",
+                    "volume=0.01",
+                    "-nodisp",
+                    "-v",
+                    "0",
+                ],
+                name="ffplay_sine_wave",
+                output="screen",
+                condition=IfCondition(LaunchConfiguration("keep_speaker_busy")),
             ),
         ]
     )

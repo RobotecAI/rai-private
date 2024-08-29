@@ -55,6 +55,7 @@ def parse_whoami_package():
         "The description should cover the most important aspects of the robot with respect to human interaction, "
         "as well as the robot's capabilities and limitations including sensor and actuator information. "
         "If there are any images provided, make sure to take them into account by thoroughly analyzing them. "
+        "Your description should be thorough and detailed."
         "Your reply should start with I am a ..."
     )
     llm = ChatOpenAI(model="gpt-4o-mini")

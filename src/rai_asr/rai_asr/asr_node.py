@@ -47,6 +47,17 @@ class ASRNode(Node):
 
     def _declare_parameters(self):
         self.declare_parameter(
+            "recording_device",
+            0,
+            descriptor=ParameterDescriptor(
+                type=ParameterType.PARAMETER_INTEGER,
+                description=(
+                    "Recording device number. See available by running"
+                    "python -c 'import sounddevice as sd; print(sd.query_devices())'"
+                ),
+            ),
+        )
+        self.declare_parameter(
             "language",
             "en",
             ParameterDescriptor(
@@ -104,6 +115,7 @@ class ASRNode(Node):
 
         self.grace_period = timedelta(seconds=silence_grace_period)
         self.transcription_recording_timeout = 5
+        self.recording_device_number = self.get_parameter("recording_device").get_parameter_value().integer_value  # type: ignore
 
     def _setup_publishers_and_subscribers(self):
         self.transcription_publisher = self.create_publisher(String, "/from_human", 10)
@@ -130,7 +142,7 @@ class ASRNode(Node):
         )
 
     def tts_status_callback(self, msg: String):
-        if msg.data == "playing":
+        if msg.data == "processing":
             self.tts_lock = True
         elif msg.data == "waiting":
             self.tts_lock = False
@@ -146,6 +158,7 @@ class ASRNode(Node):
         stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=1,
+            device=self.recording_device_number,
             dtype="int16",
             blocksize=window_size_samples,
         )
@@ -190,6 +203,7 @@ class ASRNode(Node):
         self.is_recording = False
         self.publish_status("transcribing")
         self.transcribe_audio()
+        self.publish_status("waiting")
 
     def transcribe_audio(self):
         self.get_logger().info("Calling ASR model")
@@ -202,8 +216,9 @@ class ASRNode(Node):
 
             response = self.model(file=temp_wav_buffer, language=self.language)
             transcription = response.text
-            if transcription == "you":
-                self.get_logger().info("Dropping transcription: 'you'")
+            if transcription.lower() in ["you", ""]:
+                self.get_logger().info(f"Dropping transcription: '{transcription}'")
+                self.publish_status("dropping")
             else:
                 self.get_logger().info(f"Transcription: {transcription}")
                 self.publish_transcription(transcription)
@@ -217,7 +232,9 @@ class ASRNode(Node):
         msg.data = transcription
         self.transcription_publisher.publish(msg)
 
-    def publish_status(self, status: Literal["recording", "transcribing"]):
+    def publish_status(
+        self, status: Literal["recording", "transcribing", "dropping", "waiting"]
+    ):
         msg = String()
         msg.data = status
         self.status_publisher.publish(msg)

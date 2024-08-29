@@ -55,7 +55,13 @@ def generate_launch_description():
     )
 
     asr_node = Node(
-        package="rai_asr", executable="asr_node", name="asr_node", output="screen"
+        package="rai_asr",
+        executable="asr_node",
+        name="asr_node",
+        output="screen",
+        parameters=[
+            {"recording_device": LaunchConfiguration("recording_device", default=0)}
+        ],
     )
 
     hmi_node = Node(

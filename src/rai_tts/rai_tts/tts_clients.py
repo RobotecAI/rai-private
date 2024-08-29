@@ -21,6 +21,8 @@ from typing import Optional
 import requests
 from elevenlabs.client import ElevenLabs
 
+TTS_TRIES = 2
+
 
 class TTSClient:
     @abstractmethod
@@ -46,11 +48,19 @@ class ElevenLabsClient(TTSClient):
         self.client = ElevenLabs(base_url=None, api_key=api_key)
 
     def synthesize_speech_to_file(self, text: str) -> str:
-        response = self.client.generate(
-            text=text,
-            voice=self.voice,
-            optimize_streaming_latency=4,
-        )
+        tries = 0
+        while tries < TTS_TRIES:
+            try:
+                response = self.client.generate(
+                    text=text,
+                    voice=self.voice,
+                    optimize_streaming_latency=4,
+                )
+                audio_data = b"".join(response)
+                return self.save_audio_to_file(audio_data, suffix=".mp3")
+            except Exception as e:
+                self.get_logger().warn(f"Error ocurred during sythesizing speech: {e}.")  # type: ignore
+                tries += 1
         audio_data = b"".join(response)
         return self.save_audio_to_file(audio_data, suffix=".mp3")
 

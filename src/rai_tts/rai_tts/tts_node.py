@@ -51,26 +51,45 @@ class TTSNode(Node):
         self.queue: PriorityQueue[TTSJob] = PriorityQueue()
         self.it: int = 0
         self.job_id: int = 0
+        self.queued_job_id = 0
         self.tts_client = self._initialize_client()
         self.create_timer(0.01, self.status_callback)
         threading.Thread(target=self._process_queue).start()
         self.get_logger().info("TTS Node has been started")  # type: ignore
+        self.threads_number = 0
+        self.threads_max = 5
+        self.thread_lock = threading.Lock()
 
     def status_callback(self):
-        if self.queue.empty() and self.playing is False:
+        if self.threads_number == 0 and self.playing is False and self.queue.empty():
             self.status_publisher.publish(String(data="waiting"))
         else:
-            self.status_publisher.publish(String(data="playing"))
+            self.status_publisher.publish(String(data="processing"))
 
     def listener_callback(self, msg: String):
         self.playing = True
         self.get_logger().info(  # type: ignore
             f"Registering new TTS job: {self.job_id} length: {len(msg.data)} chars."  # type: ignore
         )
+
         threading.Thread(
-            target=self.synthesize_speech, args=(self.job_id, msg.data)  # type: ignore
+            target=self.start_synthesize_thread, args=(msg, self.job_id)  # type: ignore
         ).start()
         self.job_id += 1
+
+    def start_synthesize_thread(self, msg: String, job_id: int):
+        while True:
+            with self.thread_lock:
+                if (
+                    self.threads_number < self.threads_max
+                    and self.queued_job_id == job_id
+                ):
+                    threading.Thread(
+                        target=self.synthesize_speech, args=(job_id, msg.data)  # type: ignore
+                    ).start()
+                    self.threads_number += 1
+                    self.queued_job_id += 1
+                    return
 
     def synthesize_speech(
         self,
@@ -84,6 +103,8 @@ class TTSNode(Node):
         self.get_logger().info(f"Job {id} completed.")  # type: ignore
         tts_job = TTSJob(id, temp_file_path)
         self.queue.put(tts_job)
+        with self.thread_lock:
+            self.threads_number -= 1
 
         return temp_file_path
 
@@ -100,6 +121,8 @@ class TTSNode(Node):
                     self._play_audio(tts_job.file_path)
 
     def _play_audio(self, filepath: str):
+        self.playing = True
+        self.status_publisher.publish(String(data="playing"))
         subprocess.run(
             ["ffplay", "-v", "0", "-nodisp", "-autoexit", filepath],
             stdout=subprocess.DEVNULL,
