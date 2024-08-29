@@ -10,7 +10,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![GitHub Release](https://img.shields.io/github/v/release/RobotecAI/rai)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/RobotecAI/rai/poetry-test.yml)
+![GitHub branch check runs](https://img.shields.io/github/check-runs/RobotecAI/rai/development)
 ![Contributors](https://img.shields.io/github/contributors/robotecai/rai)
 
 ![Static Badge](https://img.shields.io/badge/Ubuntu-24.04-orange)
