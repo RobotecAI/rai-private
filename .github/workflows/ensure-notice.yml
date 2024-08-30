@@ -1,0 +1,67 @@
+name: Check Copyright Notice
+
+on:
+  pull_request:
+    paths:
+      - '**/*.py'
+
+jobs:
+  check-copyright:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Run Copyright Notice Check
+      run: |
+        # Find all modified python files in the PR
+        FILES=$(git diff --name-only origin/development -- '*.py')
+        
+        # Set the copyright notice you want to check for
+        COPYRIGHT_NOTICE="Copyright (c) 2024 Your Company Name"
+        name: Check Copyright Notice
+
+on:
+  pull_request:
+    paths:
+      - '**/*.py'
+
+jobs:
+  check-copyright:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Run Copyright Notice Check
+      run: |
+        # Find all modified python files in the PR
+        FILES=$(git diff --name-only origin/main -- '*.py')
+        
+        # Set the copyright notice to check for
+        COPYRIGHT_NOTICE=$(cat <<EOF
+# Copyright (C) 2024 Robotec.AI
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+EOF
+)
+
+        # Loop through each file and check if the copyright notice is present
+        for FILE in $FILES; do
+          if ! grep -q "$COPYRIGHT_NOTICE" "$FILE"; then
+            echo "Copyright notice missing or incorrect in $FILE"
+            exit 1
+          fi
+        done
