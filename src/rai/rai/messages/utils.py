@@ -16,12 +16,13 @@
 import base64
 from typing import Any, Callable, Union
 
+import cv2
 import numpy as np
 import requests
 
 
 def preprocess_image(
-    image: Union[str, bytes, np.ndarray[Any, np.dtype[np.uint8]]],
+    image: Union[str, bytes, np.ndarray[Any, np.dtype[np.uint8 | np.float_]]],
     encoding_function: Callable[[Any], str] = lambda x: base64.b64encode(x).decode(
         "utf-8"
     ),
@@ -37,7 +38,9 @@ def preprocess_image(
         image_data = image
         encoding_function = lambda x: x.decode("utf-8")
     elif isinstance(image, np.ndarray):  # type: ignore
-        image_data = image.tobytes()
+        if image.dtype == np.float32 or image.dtype == np.float64:
+            image = (image * 255).astype(np.uint8)
+        _, image_data = cv2.imencode(".png", image)
         encoding_function = lambda x: base64.b64encode(x).decode("utf-8")
     else:
         image_data = image
