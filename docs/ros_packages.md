@@ -12,7 +12,7 @@ Detailed documentation and installation instructions are available in package [R
 
 Package enabling use of [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) -- an open-set detection model with ROS2.
 
-Detailed documentation and installation instructions are available in package [README](../src/rai_grounding_dino/README.md)
+Detailed documentation and installation instructions are available in package [README](../src/rai_extensions/rai_grounding_dino/README.md)
 
 ## RAI_interfaces
 

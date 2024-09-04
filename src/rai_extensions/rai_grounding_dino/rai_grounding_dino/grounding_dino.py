@@ -19,10 +19,10 @@ from pathlib import Path
 from typing import TypedDict
 
 import rclpy
+from rai_grounding_dino.boxer import GDBoxer
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 
-from rai_grounding_dino.boxer import GDBoxer
 from rai_interfaces.msg import RAIDetectionArray
 from rai_interfaces.srv import RAIGroundingDino
 

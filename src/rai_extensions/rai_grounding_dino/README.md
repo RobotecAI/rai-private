@@ -65,7 +65,7 @@ An example client is provided with the package as `rai_grounding_dino/talker.py`
 You can see it working by running:
 
 ```
-ros2 launch rai_grounding_dino example_communication_launch.xml image_path:=src/rai_grounding_dino/images/sample.jpg [weights_path:=PATH/TO/WEIGHTS]
+ros2 launch rai_grounding_dino example_communication_launch.xml image_path:=src/rai_extensions/rai_grounding_dino/images/sample.jpg [weights_path:=PATH/TO/WEIGHTS]
 ```
 
 If everything was set up properly you should see a couple of detections with classes `dinosaur`, `dragon`, and `lizard`.

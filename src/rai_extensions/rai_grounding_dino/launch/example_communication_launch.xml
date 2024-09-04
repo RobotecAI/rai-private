@@ -16,7 +16,7 @@
 
 <launch>
     <arg name="weights_path" default = ""/>
-    <arg name="image_path" default="$./src/rai_grounding_dino/images/sample.jpg" />
+    <arg name="image_path" default="$./src/rai_extensions/rai_grounding_dino/images/sample.jpg" />
 
     <node pkg="rai_grounding_dino" exec="grounding_dino" name="grounding_dino" output="screen">
         <param name="weights_path" value="$(var weights_path)" />
