@@ -15,16 +15,22 @@
 
 import argparse
 import glob
+import logging
 import subprocess
 from pathlib import Path
 
+import coloredlogs
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import SystemMessage
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from rai.apps.talk_to_docs import ingest_documentation
 from rai.messages import preprocess_image
 from rai.messages.multimodal import HumanMultimodalMessage
+from rai.utils.model_initialization import get_embeddings_model, get_llm_model
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+coloredlogs.install(level="INFO")  # type: ignore
 
 
 def parse_whoami_package():
@@ -35,42 +41,79 @@ def parse_whoami_package():
         "documentation_root", type=str, help="Path to the root of the documentation"
     )
     parser.add_argument(
-        "output",
+        "--output",
         type=str,
+        required=False,
+        default=None,
         help="Path to the output directory",
     )
     args = parser.parse_args()
+    save_dir = args.output if args.output is not None else args.documentation_root
+
+    llm = get_llm_model(model_type="simple_model")
+    embeddings_model = get_embeddings_model()
+
+    def build_docs_vector_store():
+        logger.info("Building the robot docs vector store...")
+        faiss_index = FAISS.from_documents(docs, embeddings_model)
+        faiss_index.add_documents(docs)
+        faiss_index.save_local(save_dir)
+
+    def build_robot_identity():
+        logger.info("Building the robot identity...")
+        prompt = (
+            "You will be given a robot's documentation. "
+            "Your task is to identify the robot's identity. "
+            "The description should cover the most important aspects of the robot with respect to human interaction, "
+            "as well as the robot's capabilities and limitations including sensor and actuator information. "
+            "If there are any images provided, make sure to take them into account by thoroughly analyzing them. "
+            "Your description should be thorough and detailed."
+            "Your reply should start with I am a ..."
+        )
+
+        images = glob.glob(args.documentation_root + "/images/*")
+
+        messages = [SystemMessage(content=prompt)] + [
+            HumanMultimodalMessage(
+                content=documentation,
+                images=[preprocess_image(image) for image in images],
+            )
+        ]
+        output = llm.invoke(messages)
+        assert isinstance(output.content, str), "Malformed output"
+
+        with open(save_dir + "/robot_identity.txt", "w") as f:
+            f.write(output.content)
+        logger.info("Done")
 
     docs = ingest_documentation(
         documentation_root=args.documentation_root + "/documentation"
     )
-    faiss_index = FAISS.from_documents(docs, OpenAIEmbeddings())
-    faiss_index.add_documents(docs)
-    save_dir = args.output
-    faiss_index.save_local(save_dir)
-
-    prompt = (
-        "You will be given a robot's documentation. "
-        "Your task is to identify the robot's identity. "
-        "The description should cover the most important aspects of the robot with respect to human interaction, "
-        "as well as the robot's capabilities and limitations including sensor and actuator information. "
-        "If there are any images provided, make sure to take them into account by thoroughly analyzing them. "
-        "Your description should be thorough and detailed."
-        "Your reply should start with I am a ..."
+    documentation = str([doc.page_content for doc in docs])
+    n_tokens = len(documentation) // 4.0
+    logger.info(
+        "Building the robot docs vector store... "
+        f"The documentation's length is {len(documentation)} chars, "
+        f"approximately {n_tokens} tokens"
     )
-    llm = ChatOpenAI(model="gpt-4o-mini")
+    logger.warn("Do you want to continue? (y/n)")
+    if input() == "y":
+        build_docs_vector_store()
+    else:
+        logger.info("Skipping the robot docs vector store creation.")
 
-    images = glob.glob(args.documentation_root + "/images/*")
-
-    messages = [SystemMessage(content=prompt)] + [
-        HumanMultimodalMessage(
-            content=str([doc.page_content for doc in docs]),
-            images=[preprocess_image(image) for image in images],
+    logger.info(
+        "Building the robot identity... "
+        f"You can do it manually by creating {save_dir}/robot_identity.txt "
+    )
+    logger.warn("Do you want to continue? (y/n)")
+    if input() == "y":
+        build_robot_identity()
+    else:
+        logger.info(
+            f"Skipping the robot identity creation. "
+            f"You can do it manually by creating {save_dir}/robot_identity.txt"
         )
-    ]
-    output = llm.invoke(messages)
-    with open(save_dir + "/robot_identity.txt", "w") as f:
-        f.write(output.content)
 
 
 def create_rai_ws():
@@ -125,7 +168,7 @@ def create_rai_ws():
 
 # TODO: Refactor this hacky solution
 # NOTE (mkotynia) fast solution, worth refactor in the future and testing if it generic for all setup.py file confgurations
-def modify_setup_py(setup_py_path):
+def modify_setup_py(setup_py_path: Path):
     with open(setup_py_path, "r") as file:
         setup_content = file.read()
 
@@ -157,7 +200,3 @@ def modify_setup_py(setup_py_path):
 
     with open(setup_py_path, "w") as file:
         file.write(modified_script)
-
-
-if __name__ == "__main__":
-    create_rai_ws()

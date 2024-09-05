@@ -47,6 +47,7 @@ langchain-ollama = "^0.1.1"
 
 streamlit = "^1.37.1"
 deprecated = "^1.2.14"
+tomli = "^2.0.1"
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.4"
 

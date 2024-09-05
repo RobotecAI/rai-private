@@ -1,0 +1,19 @@
+[vendor]
+name = "openai" # openai, aws, ollama
+
+[aws]
+simple_model = "anthropic.claude-3-haiku-20240307-v1:0"
+complex_model = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+embeddings_model = "amazon.titan-embed-text-v1"
+region_name = "us-east-1"
+
+[openai]
+simple_model = "gpt-4o-mini"
+complex_model = "gpt-4o"
+embeddings_model = "text-embedding-ada-002"
+
+[ollama]
+simple_model = "llama3.1"
+complex_model = "llama3.1:70b"
+embeddings_model = "llama3.1"
+base_url = "http://localhost:11434"
