@@ -1,20 +1,24 @@
-# robot_whoami
+# Your robot identity in RAI
 
-Certain parts of RAI rely on robot's whoami package. Your robot's whoami package serves as a configuration package for the rai_whoami node, which is responsible for the robot identity, self-understanding, ethical code, and documentation.
+RAI Agent needs to understand what kind of robot it is running on.
+This includes its looks, purpose, ethical code, equipment, capabilities and documentation.
+To configure RAI for your robot, provide contents for your robot's so called `whoami` package.
 
-## Creating robot's whoami (Franka Emika Panda)
+Your robot's `whoami` package serves as a configuration package for the `rai_whoami` node.
 
-1. Create a whoami package for panda
+## Example (Franka Emika Panda arm)
+
+1. Create a whoami package for Panda
 
 ```
 poetry run create_rai_ws --name panda --destination-directory src/examples
 ```
 
-2. Fill in the src/examples/panda_whoami/description folder with data:\
+2. Fill in the `src/examples/panda_whoami/description` folder with data:\
    2.1 Save [this image](https://robodk.com/robot/img/Franka-Emika-Panda-robot.png) into `src/examples/panda_whoami/description/images`\
    2.2 Save [this document](https://github.com/user-attachments/files/16417196/Franka.Emika.Panda.robot.-.RoboDK.pdf) in `src/examples/panda_whoami/description/documentation`
 
-3. Run the parse_whoami_package to build vector database and reason out the identity
+3. Run the `parse_whoami_package`. This will process the documentation, building it into a vector database, which is used by RAI agent to reason about its identity.
 
 ```
 poetry run parse_whoami_package src/examples/panda_whoami/description src/examples/panda_whoami/description
@@ -23,11 +27,11 @@ poetry run parse_whoami_package src/examples/panda_whoami/description src/exampl
 > [!IMPORTANT]  
 > For now, this works only if you have OPENAI_API_KEY variable exported.
 
-## Testing panda_whoami
+## Testing
 
-rai_whoami provides services for gathering information about current platform. Test the panda_whoami package by:
+You can test your new `panda_whoami` package by calling `rai_whoami` services:
 
-1. Building and sourcing the install
+2. Building and sourcing the install
 
 ```
 colcon build
@@ -42,9 +46,7 @@ ros2 run rai_whoami rai_whoami_node --ros-args -p robot_description_package:="pa
 ros2 service call /rai_whoami_identity_service std_srvs/srv/Trigger # ask for identity
 ros2 service call /rai_whoami_selfimages_service std_srvs/srv/Trigger # ask for images folder
 ros2 service call /rai_whoami_constitution_service std_srvs/srv/Trigger # ask for robot constitution
-ros2 service call /rai_whoami_documentation_service rai_interfaces/srv/VectorStoreRetrieval "query:  'maximum load'" # ask for panda's maximum load
+ros2 service call /rai_whoami_documentation_service rai_interfaces/srv/VectorStoreRetrieval "query:  'maximum load'" # ask for Panda's maximum load
 ```
 
-## Voila
-
-If rai_whoami responds to the service calls, panda_whoami package has been properly initialized.
+If your service calls succeed, your `panda_whoami` package has been properly initialized.

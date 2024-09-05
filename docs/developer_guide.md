@@ -1,6 +1,7 @@
 # Developer Guide
 
-RAI is a problem-agnostic framework designed to provide a general solution for various tasks. It is easily extendable, allowing developers to adapt and integrate new functionalities and tools to meet specific needs.
+RAI is a flexible AI agent framework designed to handle tasks in generalized manner.
+It is easily extendable, allowing developers to adapt and integrate new functionalities and tools to meet their needs.
 
 ## Try out RAI
 
@@ -15,16 +16,16 @@ print(agent("Please publish 'Hello RAI' to /chatter topic only once")) # make su
 
 ## Adjusting RAI for Your Robot
 
-### 1. Create Your Robot whoami configuration package [Optional]
+### 1. Create Your Robot whoami configuration package
 
-The whoami package is used for configuring your robot within the RAI ecosystem. It helps define the robot's identity, self-understanding, ethical code, and documentation. For instructions see [configure RAI for your robot](create_robots_whoami.md).
-
-> [!NOTE]  
-> While RAI's agents can be started without a whoami configuration package, we strongly recommend integrating it for a more complete setup.
+Follow instructions to [configure RAI identity for your robot](create_robots_whoami.md).
 
 ### 2. Implement new tools specific to your robot
 
-To extend RAI with tools specific to your robot, implement new tool functions as shown below. These functions should be decorated with @tool and should interact with your robot's API.
+RAI has general capabilities to interact through ROS interfaces such as actions and topics.
+However, you can extend RAI with tools dedicated to what your robot needs to do.
+These functions should be decorated with @tool and should interact with your robot's API.
+See the example below.
 
 ```python
 from langchain.tools import tool, BaseTool
@@ -88,3 +89,7 @@ Additional resources:
 - Available ROS 2 packages: [ros packages](ros_packages.md).
 - [Human-Robot Interface](human_robot_interface.md) through voice and text.
 - [Manipulation](manipulation.md) with OpenVLA.
+
+## Architecture diagram
+
+![rai_arch.png](imgs%2Frai_arch.png)

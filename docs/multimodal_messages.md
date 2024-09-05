@@ -1,11 +1,11 @@
 # Message Types
 
-RAI implements MultimodalMessage that allows using image and audio* information.\
+RAI implements `MultimodalMessage` that allows using image and audio* information.\
 *audio is currently added as a placeholder
 
 ## Usage
 
-Use multimodal message via it's concrete implementation.
+Use multimodal message via its implementation.
 
 ```python
 class HumanMultimodalMessage(HumanMessage, MultimodalMessage):
