@@ -1,5 +1,5 @@
 repositories:
-  src/examples/rosbot-xl-demo:
+  src/examples/rai-rosbot-xl-demo:
     type: git
     url: https://github.com/RobotecAI/rai-rosbot-xl-demo.git
     version: development

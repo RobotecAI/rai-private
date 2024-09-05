@@ -31,7 +31,7 @@ vcs import < demos.repos
 
 4. Start navigation stack:
    ```bash
-   ./src/examples/rosbot-xl-demo/run-nav.sh
+   ./src/examples/rai-rosbot-xl-demo/run-nav.sh
    ```
 
 ### Building the project yourself
