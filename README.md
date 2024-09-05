@@ -4,9 +4,15 @@
 > **RAI is in beta phase now, expect friction. Early contributors are the most welcome!** \
 > **RAI is developing fast towards a glorious release in time for ROSCon 2024.**
 
-![rai-image](./docs/imgs/RAI_simple_diagram_medium.png)
+RAI is a flexible AI agent framework to develop and deploy Gen AI features for your robots.
+
+---
 
 <div align="center">
+
+![rai-image](./docs/imgs/RAI_simple_diagram_medium.png)
+
+---
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![GitHub Release](https://img.shields.io/github/v/release/RobotecAI/rai)
@@ -22,6 +28,8 @@
 [![](https://dcbadge.limes.pink/api/server/https://discord.gg/GZGfejUSjt)](https://discord.gg/GZGfejUSjt)
 
 </div>
+
+---
 
 ## Overview
 
