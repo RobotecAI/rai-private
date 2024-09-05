@@ -3,6 +3,16 @@
 RAI is a flexible AI agent framework designed to handle tasks in generalized manner.
 It is easily extendable, allowing developers to adapt and integrate new functionalities and tools to meet their needs.
 
+## Development Environment Setup
+
+1. Follow installation instructions from [Quick Start](../README.md#quick-start)
+2. Activate [pre-commit](https://pre-commit.com) hook for automatic code checking
+   and formatting (it uses [../.pre-commit-config.yaml](../.pre-commit-config.yaml)).
+
+   ```bash
+   pre-commit install
+   ```
+
 ## Try out RAI
 
 ```python
