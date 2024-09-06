@@ -130,6 +130,7 @@ class NodeDiscovery:
 class RaiBaseNode(Node):
     def __init__(
         self,
+        whitelist: Optional[List[str]] = None,
         *args,
         **kwargs,
     ):
@@ -143,7 +144,7 @@ class RaiBaseNode(Node):
             self.DISCOVERY_FREQ,
             self.discovery,
         )
-        self.ros_discovery_info = NodeDiscovery(whitelist=None)
+        self.ros_discovery_info = NodeDiscovery(whitelist=whitelist)
         self.discovery()
         self.qos_profile = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -214,10 +215,9 @@ class RaiGenericBaseNode(RaiBaseNode):
         *args,
         **kwargs,
     ):
-        super().__init__(node_name, *args, **kwargs)
+        super().__init__(node_name=node_name, whitelist=whitelist, *args, **kwargs)
         self.llm = llm
 
-        self.whitelist = whitelist
         self.robot_state = dict()
         self.state_topics = observe_topics if observe_topics is not None else []
         self.state_postprocessors = (
@@ -387,7 +387,9 @@ class RaiNode(RaiGenericBaseNode):
             # TODO(boczekbartek): add graph node to langgraph which will send ros2 action feedback to HMI
 
             # ---- Share Action Result ----
-            report: Report = state["messages"][-1].content
+            report = state["messages"][-1]
+            if not isinstance(report, Report):
+                raise ValueError(f"Unexpected type of agent output: {type(report)}")
 
             result = TaskAction.Result()
             result.success = report.success
