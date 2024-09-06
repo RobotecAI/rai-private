@@ -16,6 +16,7 @@
 from enum import Enum
 
 from langchain_core.pydantic_v1 import BaseModel
+from pydantic import UUID4
 
 
 class Priority(str, Enum):
@@ -26,7 +27,11 @@ class Priority(str, Enum):
     lowest = "lowest"
 
 
-class Task(BaseModel):
+class TaskInput(BaseModel):
     name: str
     description: str
     priority: Priority
+
+
+class Task(TaskInput):
+    uid: UUID4
