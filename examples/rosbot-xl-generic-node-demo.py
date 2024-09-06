@@ -20,6 +20,7 @@ import rclpy.executors
 import rclpy.qos
 import rclpy.subscription
 import rclpy.task
+from langchain.tools.render import render_text_description_and_args
 from langchain_openai import ChatOpenAI
 
 from rai.agents.state_based import create_state_based_agent
@@ -68,10 +69,9 @@ def main():
         "/wait",
     ]
 
-    SYSTEM_PROMPT = "You are an autonomous robot connected to ros2 environment. Your main goal is to fulfill the user's requests. "
-    "Do not make assumptions about the environment you are currently in. "
-    "Use the tooling provided to gather information about the environment."
-    "You can use ros2 topics, services and actions to operate."
+    # TODO(boczekbartek): refactor system prompt
+
+    SYSTEM_PROMPT = ""
 
     node = RaiNode(
         llm=ChatOpenAI(
@@ -93,6 +93,18 @@ def main():
     ]
 
     state_retriever = node.get_robot_state
+
+    SYSTEM_PROMPT = f"""You are an autonomous robot connected to ros2 environment. Your main goal is to fulfill the user's requests.
+    Do not make assumptions about the environment you are currently in.
+    Use the tooling provided to gather information about the environment:
+
+    {render_text_description_and_args(tools)}
+
+    You can use ros2 topics, services and actions to operate. """
+
+    node.get_logger().info(f"{SYSTEM_PROMPT=}")
+
+    node.system_prompt = node.initialize_system_prompt(SYSTEM_PROMPT)
 
     app = create_state_based_agent(
         llm=llm,
