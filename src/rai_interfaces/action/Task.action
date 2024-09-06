@@ -6,6 +6,7 @@ string priority
 ---
 # Result
 bool success
+string report
 
 ---
 # Feedback

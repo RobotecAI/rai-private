@@ -90,7 +90,9 @@ class Ros2GetTopicsNamesAndTypesTool(Ros2BaseTool):
 
 class Ros2GetRobotInterfaces(Ros2BaseTool):
     name: str = "ros2_robot_interfaces"
-    description: str = "A tool for getting all ros2 robot interfaces"
+    description: str = (
+        "A tool for getting all ros2 robot interfaces: topics, services and actions"
+    )
 
     def _run(self):
         return self.node.ros_discovery_info.dict()
