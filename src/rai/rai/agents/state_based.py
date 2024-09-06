@@ -76,6 +76,9 @@ class Report(BaseModel):
     steps: List[str] = Field(
         ..., title="Steps", description="The steps taken to solve the problem"
     )
+    success: bool = Field(
+        ..., title="Success", description="Whether the problem was solved"
+    )
     response_to_user: str = Field(
         ..., title="Response", description="The response to the user"
     )

@@ -17,7 +17,6 @@ import functools
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from pprint import pformat
 from typing import Any, Callable, Deque, Dict, List, Literal, Optional, Tuple
 
 import rcl_interfaces.msg
@@ -34,7 +33,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
 from rclpy.action.graph import get_action_names_and_types
-from rclpy.action.server import ActionServer
+from rclpy.action.server import ActionServer, GoalResponse, ServerGoalHandle
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy,
@@ -45,7 +44,7 @@ from rclpy.qos import (
 )
 from std_srvs.srv import Trigger
 
-from rai.agents.state_based import State
+from rai.agents.state_based import Report, State
 from rai.messages.multimodal import HumanMultimodalMessage
 from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
 from rai.tools.utils import wait_for_message
@@ -233,20 +232,8 @@ class RaiGenericBaseNode(RaiBaseNode):
             Trigger, "rai_whoami_identity_service"
         )
 
-        self.DISCOVERY_FREQ = 2.0
-        self.DISCOVERY_DEPTH = 5
-
         self.callback_group = rclpy.callback_groups.MutuallyExclusiveCallbackGroup()
 
-        self.qos_profile = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.VOLATILE,
-            liveliness=LivelinessPolicy.AUTOMATIC,
-        )
-
-        self.state_subscribers = dict()
         self.initialize_robot_state_interfaces(self.state_topics)
 
         self.system_prompt = self.initialize_system_prompt(system_prompt)
@@ -310,6 +297,14 @@ class RaiGenericBaseNode(RaiBaseNode):
             self.state_subscribers[topic] = subscriber
 
 
+def parse_task_goal(ros_action_goal: TaskAction.Goal) -> Dict[str, Any]:
+    return dict(
+        task=ros_action_goal.task,
+        description=ros_action_goal.description,
+        priority=ros_action_goal.priority,
+    )
+
+
 class RaiNode(RaiGenericBaseNode):
     def __init__(
         self,
@@ -332,11 +327,7 @@ class RaiNode(RaiGenericBaseNode):
             **kwargs,
         )
 
-        # ---------- ROS Parameters ----------
-        self.task_topic = "/task_addition_requests"
-
         # ---------- ROS configuration ----------
-
         self.rosout_sub = self.create_subscription(
             rcl_interfaces.msg.Log,
             "/rosout",
@@ -347,8 +338,14 @@ class RaiNode(RaiGenericBaseNode):
 
         # ---------- Task Queue ----------
         self.task_action_server = ActionServer(
-            self, TaskAction, "perform_task", self.agent_loop
+            self,
+            TaskAction,
+            "perform_task",
+            execute_callback=self.agent_loop,
+            goal_callback=self.goal_callback,
         )
+        # Node is busy when task is executed. Only 1 task is allowed
+        self.busy = False
 
         # ---------- LLM Agents ----------
         self.AGENT_RECURSION_LIMIT = 100
@@ -358,45 +355,50 @@ class RaiNode(RaiGenericBaseNode):
         # self.agent_loop_thread = Thread(target=self.agent_loop)
         # self.agent_loop_thread.start()
 
-    def agent_loop(self, goal_handle: TaskAction.Goal):
-        self.get_logger().info(f"Received goal handle: {goal_handle}")
-        action_request = goal_handle.request
-        task = dict(
-            task=action_request.task,
-            description=action_request.description,
-            priority=action_request.priority,
-        )
-        self.get_logger().info(f"Received task: {task}")
+    def goal_callback(self, _) -> GoalResponse:
+        """Accept or reject a client request to begin an action."""
+        response = GoalResponse.REJECT if self.busy else GoalResponse.ACCEPT
+        self.get_logger().info(f"Received goal request. Response: {response}")
+        return response
 
-        # ---- LLM Task Handling ----
-        messages = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=f"Task: {task}"),
-        ]
+    async def agent_loop(self, goal_handle: ServerGoalHandle):
+        self.busy = True
+        try:
+            action_request: TaskAction.Goal = goal_handle.request
+            task: Dict[str, Any] = parse_task_goal(
+                action_request
+            )  # TODO(boczekbartek): base model and json
 
-        payload = State(messages=messages)
+            self.get_logger().info(f"Received task: {task}")
 
-        state: State = self.llm_app.invoke(
-            payload, {"recursion_limit": self.AGENT_RECURSION_LIMIT}
-        )  # type: ignore
+            # ---- LLM Task Handling ----
+            messages = [
+                SystemMessage(content=self.system_prompt),
+                HumanMessage(content=f"Task: {task}"),
+            ]
 
-        # ---- Share Action feedback ----
-        # TODO(boczekbartek): add graph node to langgraph which will send ros2 action feedback to HMI
+            payload = State(messages=messages)
 
-        # ---- Share Action Result ----
-        report = state["messages"][-1]
-        report = pformat(report.json())
+            state: State = self.llm_app.invoke(
+                payload, {"recursion_limit": self.AGENT_RECURSION_LIMIT}
+            )  # type: ignore
 
-        result = TaskAction.Result()
-        result.success = (
-            True  # TODO(boczekbartek): ask llm if the action has been successful
-        )
-        result.report = report
+            # ---- Share Action feedback ----
+            # TODO(boczekbartek): add graph node to langgraph which will send ros2 action feedback to HMI
 
-        self.get_logger().info(f"Finished task:\n{report}")
-        self.clear_state()
+            # ---- Share Action Result ----
+            report: Report = state["messages"][-1].content
 
-        return report
+            result = TaskAction.Result()
+            result.success = report.success
+            result.report = report.response_to_user
+
+            self.get_logger().info(f"Finished task:\n{result}")
+            self.clear_state()
+
+            return result
+        finally:
+            self.busy = False
 
     def set_app(self, app: CompiledGraph):
         self.llm_app = app
