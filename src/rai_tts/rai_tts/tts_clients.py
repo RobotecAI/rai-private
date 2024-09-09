@@ -13,6 +13,7 @@
 # limitations under the License.
 #
 
+import logging
 import os
 import tempfile
 from abc import abstractmethod
@@ -20,6 +21,8 @@ from typing import Optional
 
 import requests
 from elevenlabs.client import ElevenLabs
+
+logger = logging.getLogger(__name__)
 
 TTS_TRIES = 2
 
@@ -59,7 +62,7 @@ class ElevenLabsClient(TTSClient):
                 audio_data = b"".join(response)
                 return self.save_audio_to_file(audio_data, suffix=".mp3")
             except Exception as e:
-                self.get_logger().warn(f"Error ocurred during sythesizing speech: {e}.")  # type: ignore
+                logger.warn(f"Error ocurred during sythesizing speech: {e}.")  # type: ignore
                 tries += 1
         audio_data = b"".join(response)
         return self.save_audio_to_file(audio_data, suffix=".mp3")

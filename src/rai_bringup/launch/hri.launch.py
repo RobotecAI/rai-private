@@ -41,27 +41,37 @@ def include_tts_launch(context, *args, **kwargs):
     ]
 
 
+def include_asr_launch(context, *args, **kwargs):
+    asr_vendor = LaunchConfiguration("asr_vendor").perform(context)
+    if asr_vendor == "openai":
+        launch_file = "openai.launch.py"
+    else:
+        launch_file = "local.launch.py"
+
+    return [
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                [FindPackageShare("rai_asr"), f"/launch/{launch_file}"]
+            )
+        )
+    ]
+
+
 def generate_launch_description():
     tts_vendor_arg = DeclareLaunchArgument(
         "tts_vendor",
         default_value="elevenlabs",
         description="TTS vendor to use (opentts or elevenlabs)",
     )
-
+    asr_vendor_arg = DeclareLaunchArgument(
+        "asr_vendor",
+        default_value="local",
+        description="ASR vendor to use (openai or whisper)",
+    )
     robot_description_package_arg = DeclareLaunchArgument(
         "robot_description_package",
         default_value="rosbot_xl_whoami",
         description="Robot description package to use",
-    )
-
-    asr_node = Node(
-        package="rai_asr",
-        executable="asr_node",
-        name="asr_node",
-        output="screen",
-        parameters=[
-            {"recording_device": LaunchConfiguration("recording_device", default=0)}
-        ],
     )
 
     hmi_node = Node(
@@ -79,6 +89,7 @@ def generate_launch_description():
     )
 
     tts_launch_inclusion = OpaqueFunction(function=include_tts_launch)
+    asr_launch_inclusion = OpaqueFunction(function=include_asr_launch)
 
     whoami_node = Node(
         package="rai_whoami",
@@ -96,11 +107,12 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            tts_vendor_arg,
             robot_description_package_arg,
-            asr_node,
-            hmi_node,
+            tts_vendor_arg,
+            asr_vendor_arg,
             tts_launch_inclusion,
+            asr_launch_inclusion,
             whoami_node,
+            hmi_node,
         ]
     )

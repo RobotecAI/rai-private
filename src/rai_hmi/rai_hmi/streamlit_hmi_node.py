@@ -24,8 +24,6 @@ from langchain.memory import ConversationBufferMemory
 from langchain.tools import tool
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langchain_openai import OpenAIEmbeddings
-from langchain_openai.chat_models import ChatOpenAI
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -37,6 +35,7 @@ from rai.extensions.navigator import RaiNavigator
 from rai.messages import HumanMultimodalMessage, ToolMultimodalMessage
 from rai.node import RaiBaseNode
 from rai.tools.ros.native import GetCameraImage, Ros2GetTopicsNamesAndTypesTool
+from rai.utils.model_initialization import get_embeddings_model, get_llm_model
 from rai_hmi.task import Task
 from rai_interfaces.srv import VectorStoreRetrieval
 
@@ -133,7 +132,7 @@ def initialize_ros(robot_description_package: str):
             faiss_index = FAISS.load_local(
                 get_package_share_directory(self.robot_description_package)
                 + "/description",
-                OpenAIEmbeddings(),
+                get_embeddings_model(),
                 allow_dangerous_deserialization=True,
             )
             return faiss_index
@@ -206,11 +205,7 @@ def initialize_genAI(system_prompt: str, _node: Node):
 
 
 if __name__ == "__main__":
-    llm = ChatOpenAI(
-        temperature=0.5,
-        model="gpt-4o",
-        streaming=True,
-    )
+    llm = get_llm_model("complex_model")
     hmi_node, system_prompt, faiss_index = initialize_ros(package_name)
     agent_executor, state = initialize_genAI(
         system_prompt=system_prompt, _node=hmi_node

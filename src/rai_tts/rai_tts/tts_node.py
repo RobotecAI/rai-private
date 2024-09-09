@@ -53,7 +53,9 @@ class TTSNode(Node):
         self.job_id: int = 0
         self.queued_job_id = 0
         self.tts_client = self._initialize_client()
-        self.create_timer(0.01, self.status_callback)
+
+        status_publisher_timer_period_sec = 0.25
+        self.create_timer(status_publisher_timer_period_sec, self.status_callback)
         threading.Thread(target=self._process_queue).start()
         self.get_logger().info("TTS Node has been started")  # type: ignore
         self.threads_number = 0

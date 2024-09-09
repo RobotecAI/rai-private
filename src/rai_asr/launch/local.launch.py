@@ -33,19 +33,39 @@ def generate_launch_description():
                 description="Language code for the ASR model",
             ),
             DeclareLaunchArgument(
-                "model",
-                default_value="whisper-1",
-                description="Model type for the ASR model",
+                "model_name",
+                default_value="base",
+                description="Model name for the ASR model",
+            ),
+            DeclareLaunchArgument(
+                "model_vendor",
+                default_value="whisper",
+                description="Model vendor of the ASR",
             ),
             DeclareLaunchArgument(
                 "silence_grace_period",
-                default_value="2.0",
+                default_value="1.0",
                 description="Grace period in seconds after silence to stop recording",
             ),
             DeclareLaunchArgument(
-                "sample_rate",
-                default_value="0",
-                description="Sample rate for audio capture (0 for auto-detect)",
+                "use_wake_word",
+                default_value="False",
+                description="Whether to use wake word detection",
+            ),
+            DeclareLaunchArgument(
+                "wake_word_model",
+                default_value="",
+                description="Wake word model to use",
+            ),
+            DeclareLaunchArgument(
+                "wake_word_threshold",
+                default_value="0.5",
+                description="Threshold for wake word detection",
+            ),
+            DeclareLaunchArgument(
+                "vad_threshold",
+                default_value="0.5",
+                description="Threshold for voice activity detection",
             ),
             Node(
                 package="rai_asr",
@@ -55,12 +75,19 @@ def generate_launch_description():
                 emulate_tty=True,
                 parameters=[
                     {
+                        "recording_device": LaunchConfiguration("recording_device"),
                         "language": LaunchConfiguration("language"),
-                        "model": LaunchConfiguration("model"),
+                        "model_name": LaunchConfiguration("model_name"),
+                        "model_vendor": LaunchConfiguration("model_vendor"),
                         "silence_grace_period": LaunchConfiguration(
                             "silence_grace_period"
                         ),
-                        "sample_rate": LaunchConfiguration("sample_rate"),
+                        "use_wake_word": LaunchConfiguration("use_wake_word"),
+                        "wake_word_model": LaunchConfiguration("wake_word_model"),
+                        "wake_word_threshold": LaunchConfiguration(
+                            "wake_word_threshold"
+                        ),
+                        "vad_threshold": LaunchConfiguration("vad_threshold"),
                     }
                 ],
             ),

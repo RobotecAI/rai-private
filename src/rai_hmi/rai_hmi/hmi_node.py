@@ -24,7 +24,6 @@ from langchain.tools import tool
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -39,6 +38,7 @@ from rai.tools.ros.native import (
     Ros2GetTopicsNamesAndTypesTool,
     Ros2PubMessageTool,
 )
+from rai.utils.model_initialization import get_embeddings_model, get_llm_model
 from rai_hmi.task import Task
 from rai_hmi.tools import QueryDatabaseTool, QueueTaskTool
 from rai_interfaces.srv import VectorStoreRetrieval
@@ -48,7 +48,7 @@ from rai_interfaces.srv import VectorStoreRetrieval
 def get_current_image(topic: str) -> str:
     """Use this tool to get an image from a camera topic"""
     try:
-        llm = ChatOpenAI(model="gpt-4o-mini", streaming=True)
+        llm = get_llm_model(model_type="simple_model")
         output = GetCameraImage()._run(topic_name=topic)
         images = output["images"]
         msg = HumanMultimodalMessage(
@@ -81,8 +81,11 @@ class HMINode(Node):
             String, "to_human", 10, callback_group=self.callback_group
         )
 
+        status_publisher_timer_period_sec = 0.25
         self.create_timer(
-            0.01, self.status_callback, callback_group=self.callback_group
+            status_publisher_timer_period_sec,
+            self.status_callback,
+            callback_group=self.callback_group,
         )
 
         self.status_publisher = self.create_publisher(String, "hmi_status", 10)  # type: ignore
@@ -112,7 +115,7 @@ class HMINode(Node):
         self.get_logger().info("HMI Node has been started")
         system_prompt = self.initialize_system_prompt()
 
-        self.llm = ChatOpenAI(model="gpt-4o", streaming=True)
+        self.llm = get_llm_model(model_type="complex_model")
 
         tools = [
             QueryDatabaseTool(get_response=self.get_database_response),
@@ -199,7 +202,8 @@ class HMINode(Node):
         Always reply in first person. When you use the tool and get the output, always present it in first person.
         """
 
-        self.get_logger().info(f"System prompt initialized: {system_prompt}")
+        self.get_logger().info("System prompt initialized.")
+        self.get_logger().debug(f"System prompt: {system_prompt}")
         return system_prompt
 
     def handle_human_message(self, human_ros_msg: String):
@@ -209,7 +213,7 @@ class HMINode(Node):
         faiss_index = FAISS.load_local(
             get_package_share_directory(self.robot_description_package)
             + "/description",
-            OpenAIEmbeddings(),
+            get_embeddings_model(),
             allow_dangerous_deserialization=True,
         )
         return faiss_index
