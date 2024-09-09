@@ -245,16 +245,14 @@ class BaseHMINode(Node):
             self.task_running[uid] = False
             self.task_feedbacks.put(
                 MissionAcceptanceMessage(
-                    uid=uid, content=f"Task rejected by action server."
+                    uid=uid, content="Task rejected by action server."
                 )
             )
             return
 
         self.task_running[uid] = True
         self.task_feedbacks.put(
-            MissionAcceptanceMessage(
-                uid=uid, content=f"Task accepted by action server."
-            )
+            MissionAcceptanceMessage(uid=uid, content="Task accepted by action server.")
         )
         self.get_logger().info("Task goal accepted by action server.")
         self._get_result_future = goal_handle.get_result_async()
