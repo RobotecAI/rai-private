@@ -56,7 +56,7 @@ class Ros2GetActionNamesAndTypesTool(Ros2BaseTool):
 class Ros2RunActionSync(Ros2BaseTool):
     name: str = "Ros2RunAction"
     description: str = (
-        "A tool for running a ros2 action. Actions might take some time to execute and are blocking - you will not be able to check their feedback, only will be informed about the result"
+        "A tool for running a ros2 action. Make sure you know the action interface first!!! Actions might take some time to execute and are blocking - you will not be able to check their feedback, only will be informed about the result"
     )
 
     args_schema: Type[Ros2ActionRunnerInput] = Ros2ActionRunnerInput
