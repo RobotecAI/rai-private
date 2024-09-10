@@ -15,9 +15,7 @@
 
 import functools
 import time
-from collections import deque
-from dataclasses import dataclass, field
-from typing import Any, Callable, Deque, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 import rcl_interfaces.msg
 import rclpy
@@ -27,9 +25,7 @@ import rclpy.qos
 import rclpy.subscription
 import rclpy.task
 import sensor_msgs.msg
-from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
 from rclpy.action.graph import get_action_names_and_types
@@ -48,83 +44,8 @@ from rai.agents.state_based import Report, State
 from rai.messages.multimodal import HumanMultimodalMessage
 from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
 from rai.tools.utils import wait_for_message
+from rai.utils.ros import NodeDiscovery, RosoutBuffer
 from rai_interfaces.action import Task as TaskAction
-
-
-class RosoutBuffer:
-    def __init__(self, llm, bufsize: int = 100) -> None:
-        self.bufsize = bufsize
-        self._buffer: Deque[str] = deque()
-        self.template = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "Shorten the following log keeping its format - for example merge simillar or repeating lines",
-                ),
-                ("human", "{rosout}"),
-            ]
-        )
-        llm = llm
-        self.llm = self.template | llm
-
-    def clear(self):
-        self._buffer.clear()
-
-    def append(self, line: str):
-        self._buffer.append(line)
-        if len(self._buffer) > self.bufsize:
-            self._buffer.popleft()
-
-    def get_raw_logs(self, last_n: int = 30) -> str:
-        return "\n".join(list(self._buffer)[-last_n:])
-
-    def summarize(self):
-        if len(self._buffer) == 0:
-            return "No logs"
-        buffer = self.get_raw_logs()
-        response = self.llm.invoke({"rosout": buffer})
-        return str(response.content)
-
-
-@tool
-def wait_for_2s():
-    """Wait for 2 seconds"""
-    time.sleep(2)
-
-
-@dataclass
-class NodeDiscovery:
-    topics_and_types: Dict[str, str] = field(default_factory=dict)
-    services_and_types: Dict[str, str] = field(default_factory=dict)
-    actions_and_types: Dict[str, str] = field(default_factory=dict)
-    whitelist: Optional[List[str]] = field(default_factory=list)
-
-    def set(self, topics, services, actions):
-        def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
-            return {k: v[0] for k, v in info}
-
-        self.topics_and_types = to_dict(topics)
-        self.services_and_types = to_dict(services)
-        self.actions_and_types = to_dict(actions)
-        if self.whitelist is not None:
-            self.__filter(self.whitelist)
-
-    def __filter(self, whitelist: List[str]):
-        for d in [
-            self.topics_and_types,
-            self.services_and_types,
-            self.actions_and_types,
-        ]:
-            to_remove = [k for k in d if k not in whitelist]
-            for k in to_remove:
-                d.pop(k)
-
-    def dict(self):
-        return {
-            "topics_and_types": self.topics_and_types,
-            "services_and_types": self.services_and_types,
-            "actions_and_types": self.actions_and_types,
-        }
 
 
 class RaiBaseNode(Node):
@@ -390,6 +311,11 @@ class RaiNode(RaiGenericBaseNode):
             report = state["messages"][-1]
             if not isinstance(report, Report):
                 raise ValueError(f"Unexpected type of agent output: {type(report)}")
+
+            if report.success:
+                goal_handle.succeed()
+            else:
+                goal_handle.abort()
 
             result = TaskAction.Result()
             result.success = report.success
