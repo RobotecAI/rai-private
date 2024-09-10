@@ -24,7 +24,7 @@ from langchain.tools.render import render_text_description_and_args
 from langchain_openai import ChatOpenAI
 
 from rai.agents.state_based import create_state_based_agent
-from rai.node import RaiNode, describe_ros_image, wait_for_2s
+from rai.node import RaiNode, describe_ros_image
 from rai.tools.ros.native import (
     GetCameraImage,
     GetMsgFromTopic,
@@ -32,6 +32,7 @@ from rai.tools.ros.native import (
 )
 from rai.tools.ros.native_actions import Ros2RunActionSync
 from rai.tools.ros.tools import GetOccupancyGridTool
+from rai.tools.time import WaitForSecondsTool
 
 
 def main():
@@ -84,7 +85,7 @@ def main():
     )
 
     tools = [
-        wait_for_2s,
+        WaitForSecondsTool(),
         GetMsgFromTopic(node=node),
         Ros2RunActionSync(node=node),
         GetCameraImage(node=node),

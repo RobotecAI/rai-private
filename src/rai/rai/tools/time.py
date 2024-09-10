@@ -17,17 +17,7 @@ import time
 from typing import Type
 
 from langchain.pydantic_v1 import BaseModel, Field
-from langchain.tools import tool
 from langchain_core.tools import BaseTool
-
-
-@tool
-def sleep_max_5s(n: int):
-    """Wait n seconds, max 5s"""
-    if n > 5:
-        n = 5
-
-    time.sleep(n)
 
 
 class WaitForSecondsToolInput(BaseModel):
@@ -44,11 +34,14 @@ class WaitForSecondsTool(BaseTool):
         "A tool for waiting. "
         "Useful for pausing execution for a specified number of seconds. "
         "Input should be the number of seconds to wait."
+        "Maximum allowed time is 5 seconds"
     )
 
     args_schema: Type[WaitForSecondsToolInput] = WaitForSecondsToolInput
 
     def _run(self, seconds: int):
         """Waits for the specified number of seconds."""
+        if seconds > 5:
+            seconds = 5
         time.sleep(seconds)
         return f"Waited for {seconds} seconds."
