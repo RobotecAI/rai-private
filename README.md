@@ -45,7 +45,7 @@ The RAI framework aims to:
 ## Table of Contents
 
 - [Features](#features)
-- [Quick Start](#quick-start)
+- [Setup](#setup)
 - [Usage examples (demos)](#planned-demos)
 - [Further documentation](#further-documentation)
 - [ROSCon 2024 Talk](#roscon-2024)
@@ -111,17 +111,15 @@ source ./setup_shell.sh
 
 ### 3. Setting up vendors
 
-RAI is fully vendor-agnostic, however the beta development work currently utilizes OpenAI models.
+RAI aims to be vendor-agnostic. You can use the configuration in [config.toml](./config.toml) to set up your vendor of choice for most RAI modules.
 
-#### OpenAI
+> [!NOTE]  
+> Some of the RAI modules still are hardcoded to OpenAI models. An effort is underway to make them configurable via [config.toml](./config.toml) file.
 
-If you do not have a key, see how to generate one [here](https://platform.openai.com/docs/quickstart).
+If you do not have a vendor's key, follow the instructions below:
 
-```
-export OPENAI_API_KEY=""
-```
-
-It is best to put this command into your `~/.bashrc` file for convenience, so it is effective for each new console.
+**OpenAI:** [link](https://platform.openai.com/docs/quickstart).
+**AWS Bedrock:** [link](https://console.aws.amazon.com/bedrock/home?#/overview).
 
 Congratulations, your installation is now completed!
 
