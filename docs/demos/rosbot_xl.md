@@ -7,10 +7,15 @@ This demo utilizes Open 3D Engine simulation and allows you to work with RAI on 
 ## Quick start
 
 1. Download the newest binary release (`release.zip` file) from [rai-rosbot-xl-demo -> releases](https://github.com/RobotecAI/rai-rosbot-xl-demo/releases)
+
+> [!NOTE]
+> The release contains monolithic build of the O3DE project and is compatible with **Ubuntu 24.04** and with ROS 2 jazzy.
+> Build compatible with Ubuntu 22.04 and ROS 2 Humble will be released soon.
+
 2. Install required packages
 
    ```bash
-   sudo apt install ros-${ROS_DISTRO}-ackermann-msgs ros-${ROS_DISTRO}-gazebo-msgs ros-${ROS_DISTRO}-control-toolbox
+   sudo apt install ros-${ROS_DISTRO}-ackermann-msgs ros-${ROS_DISTRO}-gazebo-msgs ros-${ROS_DISTRO}-control-toolbox ros-${ROS_DISTRO}-nav2-bringup
    ```
 
 3. Unpack the binary and run the simulation:
