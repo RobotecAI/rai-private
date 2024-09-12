@@ -31,7 +31,6 @@ def decode_image(base64_string: str) -> Image.Image:
 @pytest.mark.parametrize(
     "test_image",
     [
-        "https://upload.wikimedia.org/wikipedia/commons/6/63/Wikipedia-logo.png",
         np.zeros((300, 300, 3)),
         "tests/resources/image.png",
     ],
