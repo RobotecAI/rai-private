@@ -62,7 +62,7 @@ class ElevenLabsClient(TTSClient):
                 audio_data = b"".join(response)
                 return self.save_audio_to_file(audio_data, suffix=".mp3")
             except Exception as e:
-                logger.warn(f"Error ocurred during sythesizing speech: {e}.")  # type: ignore
+                logger.warn(f"Error occurred during sythesizing speech: {e}.")  # type: ignore
                 tries += 1
         audio_data = b"".join(response)
         return self.save_audio_to_file(audio_data, suffix=".mp3")
