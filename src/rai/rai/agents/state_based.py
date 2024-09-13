@@ -65,7 +65,7 @@ class State(TypedDict):
 
 
 class Report(BaseModel):
-    problem: str = Field(..., title="Problem", description="The problem that occured")
+    problem: str = Field(..., title="Problem", description="The problem that occurred")
     solution: str = Field(
         ..., title="Solution", description="The solution to the problem"
     )

@@ -52,14 +52,14 @@ def robot_agnostic_planner(
 def robot_specific_planner(
     llm: BaseChatModel,
     robot_constitution: str,
-    platfrom_specific_informations: str,
+    platform_specific_information: str,
     task: str,
     planner_prompt: str = PLANNER_PROMPT,
 ) -> StepsList:
     planner_template = ChatPromptTemplate.from_messages(
         [
             ("system", robot_constitution),
-            ("system", platfrom_specific_informations),
+            ("system", platform_specific_information),
             ("system", planner_prompt),
             ("human", "The task: {input}"),
         ]

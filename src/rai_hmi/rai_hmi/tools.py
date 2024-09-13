@@ -26,7 +26,7 @@ class QueryDatabaseInput(BaseModel):
         ...,
         description=(
             "The query that will be searched in the database."
-            " eg: 'PWM informations', 'How to use the camera' etc."
+            " eg: 'PWM information', 'How to use the camera' etc."
         ),
     )
 

@@ -17,7 +17,7 @@ rosdep install --from-paths src --ignore-src -r
 
 ### Build and run
 
-In the base directory of the `RAI` package install dependancies:
+In the base directory of the `RAI` package install dependencies:
 
 ```
 poetry install --with gdino

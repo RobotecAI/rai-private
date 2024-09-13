@@ -13,7 +13,7 @@ The RAI HMI (Human-Machine Interface) allows users to converse with the robot an
 ### Published Topics
 
 - **`to_human`** (`std_msgs/String`): Outgoing plaintext messages for the user.
-- **`task_additon_requests`** (`std_msgs/String`): Tasks to be added to the queue, in JSON format.
+- **`task_addition_requests`** (`std_msgs/String`): Tasks to be added to the queue, in JSON format.
 
 ## Task JSON Schema
 
