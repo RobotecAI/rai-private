@@ -59,7 +59,7 @@ The RAI framework aims to:
 - [x] ROS 2 action calling and other interfaces. The Agent can dynamically list interfaces, check their message type, and publish.
 - [x] Integration with LangChain to abstract vendors and access convenient AI tools.
 - [x] Tasks in natural language to nav2 goals.
-- [ ] NoMaD integration.
+- [x] NoMaD integration.
 - [ ] OpenVLA integration.
 - [ ] Improved Human-Robot Interaction with voice and text.
 - [ ] SDK for RAI developers.

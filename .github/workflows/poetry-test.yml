@@ -26,7 +26,7 @@ jobs:
         uses: snok/install-poetry@v1
 
       - name: Install python dependencies
-        run: poetry install --with gdino
+        run: poetry install --with gdino,nomad
 
       - name: Update rosdep
         shell: bash

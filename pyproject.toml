@@ -62,6 +62,12 @@ torch = "^2.3.1"
 torchvision = "^0.18.1"
 rf-groundingdino = "^0.2.0"
 
+[tool.poetry.group.nomad]
+optional = true
+
+[tool.poetry.group.nomad.dependencies]
+visualnav_transformer = { git = "https://github.com/RobotecAI/visualnav-transformer-ros2.git", branch = "main" }
+gdown = "^5.2.0"
 
 [build-system]
 requires = ["setuptools>=42", "wheel"]
