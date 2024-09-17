@@ -14,6 +14,7 @@
 #
 import functools
 from enum import Enum
+from queue import Queue
 from typing import List, Optional, Tuple, cast
 
 import rclpy
@@ -84,7 +85,10 @@ class BaseHMINode(Node):
     """
 
     def __init__(
-        self, node_name: str, queue, robot_description_package: Optional[str] = None
+        self,
+        node_name: str,
+        queue: Queue,
+        robot_description_package: Optional[str] = None,
     ):
         super().__init__(node_name=node_name)
 
