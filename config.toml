@@ -9,7 +9,7 @@ region_name = "us-east-1"
 
 [openai]
 simple_model = "gpt-4o-mini"
-complex_model = "gpt-4o"
+complex_model = "gpt-4o-2024-08-06"
 embeddings_model = "text-embedding-ada-002"
 
 [ollama]

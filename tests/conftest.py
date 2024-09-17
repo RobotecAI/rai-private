@@ -23,7 +23,7 @@ import pytest
 from _pytest.terminal import TerminalReporter
 from tabulate import tabulate
 
-from rai.config.models import BEDROCK_CLAUDE_HAIKU, OPENAI_LLM, OPENAI_MULTIMODAL
+from rai.config.models import BEDROCK_CLAUDE_HAIKU, OPENAI_MINI
 
 
 @pytest.fixture
@@ -42,14 +42,14 @@ def rai_python_modules():
 def chat_openai_multimodal():
     from langchain_openai.chat_models import ChatOpenAI
 
-    return ChatOpenAI(**OPENAI_MULTIMODAL)
+    return ChatOpenAI(**OPENAI_MINI)
 
 
 @pytest.fixture
 def chat_openai_text():
     from langchain_openai.chat_models import ChatOpenAI
 
-    return ChatOpenAI(**OPENAI_LLM)
+    return ChatOpenAI(**OPENAI_MINI)
 
 
 @pytest.fixture

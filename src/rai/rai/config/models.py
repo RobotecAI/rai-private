@@ -31,18 +31,11 @@ class AWSBedrockKwargs(TypedDict):
 
 # OpenAI Models
 OPENAI_MULTIMODAL: OpenAIKwargs = {
-    "model": "gpt-4o",
-}
-OPENAI_LLM: OpenAIKwargs = {
-    "model": "gpt-3.5-turbo",
+    "model": "gpt-4o-2024-08-06",
 }
 
-OPENAI_GPT_4o: OpenAIKwargs = {
-    "model": "gpt-4o",
-}
-
-OPENAI_GPT_3_5_TURBO: OpenAIKwargs = {
-    "model": "gpt-3.5-turbo",
+OPENAI_MINI: OpenAIKwargs = {
+    "model": "gpt-4o-mini",
 }
 
 # AWS Bedrock Models
