@@ -303,7 +303,7 @@ def retriever_wrapper(
     info = str_output(retrieved_info)
     state["messages"].append(
         HumanMultimodalMessage(
-            content="Retrieved state: {}".format(info), images=images, audios=audios
+            content=f"Retrieved state: {info}", images=images, audios=audios
         )
     )
     return state
