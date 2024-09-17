@@ -20,6 +20,7 @@ from queue import Queue
 from typing import Optional
 
 import rclpy
+from langchain_core.messages import HumanMessage
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from std_msgs.msg import String
@@ -107,7 +108,7 @@ class VoiceHMINode(BaseHMINode):
         self.get_logger().info("Processing started")
 
         # handle human message
-        self.history.append(msg.data)
+        self.history.append(HumanMessage(content=msg.data))
 
         for state in self.agent.stream(dict(messages=self.history)):
             node_name = list(state.keys())[0]

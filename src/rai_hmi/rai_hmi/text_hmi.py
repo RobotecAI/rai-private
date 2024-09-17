@@ -38,7 +38,7 @@ from streamlit.delta_generator import DeltaGenerator
 from rai.agents.state_based import get_stored_artifacts
 from rai.messages import HumanMultimodalMessage
 from rai.node import RaiBaseNode
-from rai_hmi.agent import initlialize_agent
+from rai_hmi.agent import initialize_agent
 from rai_hmi.base import BaseHMINode
 from rai_hmi.chat_msgs import EMOJIS, MissionMessage
 from rai_hmi.ros import initialize_ros_nodes
@@ -71,7 +71,7 @@ def initialize_memory() -> Memory:
 def initialize_agent_streamlit(
     _hmi_node: BaseHMINode, _rai_node: RaiBaseNode, _memory: Memory
 ):
-    return initlialize_agent(_hmi_node, _rai_node, _memory)
+    return initialize_agent(_hmi_node, _rai_node, _memory)
 
 
 @st.cache_resource
