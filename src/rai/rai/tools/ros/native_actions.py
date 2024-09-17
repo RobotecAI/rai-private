@@ -82,6 +82,10 @@ class Ros2RunActionSync(Ros2BaseTool):
     def _run(
         self, action_name: str, action_type: str, action_goal_args: Dict[str, Any]
     ):
+        if action_name[0] != "/":
+            action_name = "/" + action_name
+            self.node.get_logger().info(f"Action name corrected to: {action_name}")
+
         try:
             goal_msg, msg_cls = self._build_msg(action_type, action_goal_args)
         except Exception as e:
@@ -89,7 +93,13 @@ class Ros2RunActionSync(Ros2BaseTool):
 
         client = ActionClient(self.node, msg_cls, action_name)
 
+        retries = 0
         while not client.wait_for_server(timeout_sec=1.0):
+            retries += 1
+            if retries > 5:
+                raise Exception(
+                    f"Action server '{action_name}' is not available. Make sure `action_name` is correct..."
+                )
             self.node.get_logger().info(
                 f"'{action_name}' action server not available, waiting..."
             )
