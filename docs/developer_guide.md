@@ -98,7 +98,7 @@ Additional resources:
 - [Multimodal Messages](multimodal_messages.md) definition.
 - Available ROS 2 packages: [ros packages](ros_packages.md).
 - [Human-Robot Interface](human_robot_interface.md) through voice and text.
-- [Manipulation](manipulation.md) with OpenVLA.
+- [Manipulation](manipulation.md) with Grounded SAM 2.
 
 ## Architecture diagram
 

@@ -60,7 +60,7 @@ The RAI framework aims to:
 - [x] Integration with LangChain to abstract vendors and access convenient AI tools.
 - [x] Tasks in natural language to nav2 goals.
 - [x] NoMaD integration.
-- [ ] OpenVLA integration.
+- [ ] Grounded SAM 2 integration.
 - [ ] Improved Human-Robot Interaction with voice and text.
 - [ ] SDK for RAI developers.
 - [ ] Support for at least 3 different AI vendors.
@@ -167,7 +167,7 @@ Soon you will have an opportunity to work with new RAI demos across several doma
 | Application                                | Robot                          | Description                                                                                                                                      | Link                                                          |
 | ------------------------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
 | Mission and obstacle reasoning in orchards | Autonomous tractor             | In a beautiful scene of a virtual orchard, RAI goes beyond obstacle detection to analyze best course of action for a given unexpected situation. | [🌾 demo](https://github.com/RobotecAI/rai-agriculture-demo)  |
-| Manipulation tasks with natural language   | Robot Arm (Franka Panda)       | Complete flexible manipulation tasks thanks to RAI and OpenVLA                                                                                   | [🦾 demo](https://github.com/RobotecAI/rai-manipulation-demo) |
+| Manipulation tasks with natural language   | Robot Arm (Franka Panda)       | Complete flexible manipulation tasks thanks to RAI and Grounded SAM 2                                                                            | [🦾 demo](https://github.com/RobotecAI/rai-manipulation-demo) |
 | Quadruped inspection demo                  | A robot dog (ANYbotics ANYmal) | Perform inspection in a warehouse environment, find and report anomalies                                                                         | link TBD                                                      |
 
 ## Community
