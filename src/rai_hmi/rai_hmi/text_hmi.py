@@ -21,7 +21,7 @@ import time
 import uuid
 from pprint import pformat
 from queue import Queue
-from typing import Dict, List, Optional, Set, cast
+from typing import Any, Dict, Iterator, List, Optional, Set, Union, cast
 
 import rclpy
 import streamlit as st
@@ -47,7 +47,7 @@ from rai.messages import HumanMultimodalMessage
 from rai.node import RaiBaseNode
 from rai.tools.ros.native import GetCameraImage, Ros2GetRobotInterfaces
 from rai_hmi.base import BaseHMINode
-from rai_hmi.chat_msgs import EMOJIS, MissionMessage
+from rai_hmi.chat_msgs import EMOJIS, MissionDoneMessage, MissionMessage
 from rai_hmi.task import Task, TaskInput
 
 logging.basicConfig(
@@ -57,15 +57,22 @@ logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="LangChain Chat App", page_icon="🦜")
 
-MODEL = "gpt-4o"
+MODEL = "gpt-4o-2024-08-06"
 MAX_DISPLAY = 5
+
+
+class DividerMessage:
+    name = "DividerMessage"
+
+    def __init__(self) -> None:
+        self.uuid = uuid.uuid4()
 
 
 class Memory:
     def __init__(self) -> None:
         # TODO(boczekbartek): add typehints
         self.mission_memory: List[MissionMessage] = []
-        self.chat_memory = []
+        self.chat_memory: List[BaseMessage] = []
         self.tool_calls = {}
         self.missions_uids: Set[UUID1] = set()
 
@@ -117,7 +124,11 @@ def initialize_agent(_hmi_node: BaseHMINode, _rai_node: RaiBaseNode, _memory: Me
     @tool
     def get_mission_memory(uid: str) -> List[MissionMessage]:
         """List mission memory. Mission uid is required."""
-        return _memory.get_mission_memory(uid)
+        return [
+            m
+            for m in _memory.get_mission_memory(uid)
+            if not isinstance(m, DividerMessage)
+        ]
 
     @tool
     def add_task_to_queue(task: TaskInput):
@@ -176,6 +187,12 @@ def initialize_ros_nodes(
     return hmi_node, rai_node
 
 
+def is_message_a_divider(message) -> bool:
+    return hasattr(
+        message, "uuid"
+    )  # TODO(boczekbartek): this is super hacky, but isinstance(message, DividerMessage) doesn't work for some reason
+
+
 def display_agent_message(
     message,  # TODO(boczekbartek): add typhint
     tool_chat_obj: Optional[DeltaGenerator] = None,
@@ -192,6 +209,9 @@ def display_agent_message(
         tool_call: The tool call associated with the ToolMessage.
 
     """
+    if is_message_a_divider(message):
+        return
+
     message.content = cast(str, message.content)  # type: ignore
     if not message.content:
         return  # Tool messages might not have any content, skip displying them
@@ -227,6 +247,7 @@ def display_agent_message(
     elif isinstance(message, SystemMessage):
         return  # we do not handle system messages
     elif isinstance(message, MissionMessage):
+
         logger.info("Displaying mission message")
         with st.expander(label=message.STATUS):
             avatar, content = message.render_steamlit()
@@ -277,6 +298,11 @@ class Layout:
                     st.markdown(f"Arguments: {tool_call['args']}")
                     self.tool_placeholders[tool_call["id"]] = st.empty()
 
+    def new_mission(self):
+        print(" ----------- New divider printed ")
+        st.divider()
+        self.draw_columns()
+
     def write_tool_message(self, msg: ToolMessage, tool_call: ToolCall):
         with self.chat_column:
             display_agent_message(
@@ -292,15 +318,9 @@ class Layout:
             logger.info(f'Mission said: "{msg}"')
             display_agent_message(msg)
 
-    def show_chat(self, history, tool_calls: Dict[str, ToolCall]):
-        with self.chat_column:
-            self.__show_history(history, tool_calls)
+    def show_history(self, chat, mission, tool_calls: Dict[str, ToolCall]):
+        printed_dividers = set()
 
-    def show_mission(self, history, tool_calls: Dict[str, ToolCall]):
-        with self.mission_column:
-            self.__show_history(history, tool_calls)
-
-    def __show_history(self, history, tool_calls):
         def display(message, no_expand=False):
             if isinstance(message, ToolMessage):
                 display_agent_message(
@@ -311,28 +331,43 @@ class Layout:
             else:
                 display_agent_message(message, no_expand=no_expand)
 
-        for message in history:
-            display(message)
+        chat_iter = iter(chat)
+        mission_iter = iter(mission)
 
-        # show, hide = self.__split_history(history, self.max_display)
+        iters = [chat_iter, mission_iter]
+        columns = [self.chat_column, self.mission_column]
+        current_iter = 0
 
-        # TODO(boczekbartek): fix exapndes
-        # error: streamlit.errors.StreamlitAPIException: Expanders may not be nested inside other expanders.
-        # with st.expander("Untoggle to see full chat history"):
-        # for message in hide:
-        #     display(message)
-        #
-        # for message in show:
-        #     display(message)
+        finished = [False, False]
 
-    @staticmethod
-    def __split_history(history, max_display):
-        n_messages = len(history)
-        if n_messages > max_display:
-            n_hide = n_messages - max_display
-            return history[:max_display], history[-n_hide:]
-        else:
-            return history, []
+        while True:
+            try:
+                msg = next(iters[current_iter])
+                print(f"Printing messages from: {current_iter}")
+                if is_message_a_divider(msg):
+                    if str(msg.uuid) not in printed_dividers:
+                        printed_dividers.add(str(msg.uuid))
+                        print(
+                            f"--------- Registering a divider: {msg.uuid} ---------\n"
+                        )
+                    else:
+                        st.divider()
+                        self.draw_columns()
+                        columns = [self.chat_column, self.mission_column]
+                        print(f"--------- Printing a divider: {msg.uuid} ---------")
+
+                    current_iter = 0 if current_iter == 1 else 1
+                    continue
+                else:
+                    with columns[current_iter]:
+                        display(msg)
+            except StopIteration:
+                print(f"{current_iter} is fully printed")
+                finished[current_iter] = True
+                current_iter = 0 if current_iter == 1 else 1
+                print(f"{finished=}")
+                if all(finished):
+                    break
 
 
 class Chat:
@@ -361,6 +396,11 @@ class Chat:
         logger.info(f'Mission said: "{msg}"')
         self.memory.add_mission(msg)
         self.layout.write_mission_msg(msg)
+        if isinstance(msg, MissionDoneMessage):
+            self.layout.new_mission()
+            divider_msg = DividerMessage()
+            self.memory.chat_memory.append(divider_msg)
+            self.memory.mission_memory.append(divider_msg)
 
 
 class Agent:
@@ -368,11 +408,13 @@ class Agent:
         self.memory = memory
         self.agent = initialize_agent(hmi_node, rai_node, self.memory)
 
-    def stream(self):
+    def stream(self) -> Iterator[Union[Dict[str, Any], Any]]:
         # Copy, because agent's memory != streamlit app memory. App memory is used to
         # recreate the page, agent might manipulate it's history to perform the task.
         # In simplest case it adds thinker message to the state.
         messages = self.memory.chat_memory.copy()
+        messages = [m for m in messages if not is_message_a_divider(m)]
+
         logger.info(f"Sending messages:\n{pformat(messages)}")
 
         return self.agent.stream({"messages": messages})
@@ -402,6 +444,8 @@ class StreamlitApp:
             logger.info("Got new mission update!")
             msg = self.mission_queue.get()
             self.chat.mission(msg)
+            if isinstance(msg, MissionDoneMessage):
+                self.layout.new_mission()
 
     def run(self):
         system_status = self.get_system_status()
@@ -439,8 +483,11 @@ class StreamlitApp:
             max_display (int, optional): Max number of messages to display. Rest will be hidden in a toggle. Defaults to 5.
 
         """
-        self.layout.show_chat(self.memory.chat_memory, self.memory.tool_calls)
-        self.layout.show_mission(self.memory.mission_memory, self.memory.tool_calls)
+        self.layout.show_history(
+            self.memory.chat_memory, self.memory.mission_memory, self.memory.tool_calls
+        )
+        # self.layout.show_chat(self.memory.chat_memory, self.memory.tool_calls)
+        # self.layout.show_mission(self.memory.mission_memory, self.memory.tool_calls)
 
     def prompt_callback(self):
         prompt = st.session_state.prompt
