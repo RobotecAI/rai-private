@@ -27,7 +27,7 @@ ros2 launch rai_bringup hri.launch.py tts_vendor:=opentts robot_description_pack
 ```
 
 > [!NOTE]
-> Run OpenTTS with `docker run -it -p 5500:5500 synesthesiam/opentts:en--no-espeak`
+> Run OpenTTS with `docker run -it -p 5500:5500 synesthesiam/opentts:en --no-espeak`
 
 ### ElevenLabs
 
