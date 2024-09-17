@@ -72,8 +72,6 @@ class Ros2BaseTool(BaseTool):
     node: rclpy.node.Node = Field(..., exclude=True, required=True)
 
     args_schema: Type[Ros2BaseInput] = Ros2BaseInput
-    handle_tool_error = True
-    handle_validation_error = True
 
     @property
     def logger(self) -> RcutilsLogger:

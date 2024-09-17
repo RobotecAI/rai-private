@@ -228,8 +228,9 @@ def display_agent_message(
         return  # we do not handle system messages
     elif isinstance(message, MissionMessage):
         logger.info("Displaying mission message")
-        avatar, content = message.render_steamlit()
-        st.chat_message("bot", avatar=avatar).markdown(content)
+        with st.expander(label=message.STATUS):
+            avatar, content = message.render_steamlit()
+            st.chat_message("bot", avatar=avatar).markdown(content)
     else:
         raise ValueError("Unknown message type")
 

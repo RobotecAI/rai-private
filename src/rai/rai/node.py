@@ -15,10 +15,7 @@
 
 import functools
 import time
-from collections import deque
-from dataclasses import dataclass, field
-from pprint import pformat
-from typing import Any, Callable, Deque, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 import rcl_interfaces.msg
 import rclpy
@@ -28,13 +25,11 @@ import rclpy.qos
 import rclpy.subscription
 import rclpy.task
 import sensor_msgs.msg
-from langchain.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph.graph import CompiledGraph
 from rclpy.action.graph import get_action_names_and_types
-from rclpy.action.server import ActionServer
+from rclpy.action.server import ActionServer, GoalResponse, ServerGoalHandle
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy,
@@ -45,92 +40,18 @@ from rclpy.qos import (
 )
 from std_srvs.srv import Trigger
 
-from rai.agents.state_based import State
-from rai.messages.multimodal import HumanMultimodalMessage
+from rai.agents.state_based import Report, State
+from rai.messages.multimodal import HumanMultimodalMessage, MultimodalMessage
 from rai.tools.ros.utils import convert_ros_img_to_base64, import_message_from_str
 from rai.tools.utils import wait_for_message
+from rai.utils.ros import NodeDiscovery, RosoutBuffer
 from rai_interfaces.action import Task as TaskAction
-
-
-class RosoutBuffer:
-    def __init__(self, llm, bufsize: int = 100) -> None:
-        self.bufsize = bufsize
-        self._buffer: Deque[str] = deque()
-        self.template = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "Shorten the following log keeping its format - for example merge similar or repeating lines",
-                ),
-                ("human", "{rosout}"),
-            ]
-        )
-        llm = llm
-        self.llm = self.template | llm
-
-    def clear(self):
-        self._buffer.clear()
-
-    def append(self, line: str):
-        self._buffer.append(line)
-        if len(self._buffer) > self.bufsize:
-            self._buffer.popleft()
-
-    def get_raw_logs(self, last_n: int = 30) -> str:
-        return "\n".join(list(self._buffer)[-last_n:])
-
-    def summarize(self):
-        if len(self._buffer) == 0:
-            return "No logs"
-        buffer = self.get_raw_logs()
-        response = self.llm.invoke({"rosout": buffer})
-        return str(response.content)
-
-
-@tool
-def wait_for_2s():
-    """Wait for 2 seconds"""
-    time.sleep(2)
-
-
-@dataclass
-class NodeDiscovery:
-    topics_and_types: Dict[str, str] = field(default_factory=dict)
-    services_and_types: Dict[str, str] = field(default_factory=dict)
-    actions_and_types: Dict[str, str] = field(default_factory=dict)
-    whitelist: Optional[List[str]] = field(default_factory=list)
-
-    def set(self, topics, services, actions):
-        def to_dict(info: List[Tuple[str, List[str]]]) -> Dict[str, str]:
-            return {k: v[0] for k, v in info}
-
-        self.topics_and_types = to_dict(topics)
-        self.services_and_types = to_dict(services)
-        self.actions_and_types = to_dict(actions)
-        if self.whitelist is not None:
-            self.__filter(self.whitelist)
-
-    def __filter(self, whitelist: List[str]):
-        for d in [
-            self.topics_and_types,
-            self.services_and_types,
-            self.actions_and_types,
-        ]:
-            to_remove = [k for k in d if k not in whitelist]
-            for k in to_remove:
-                d.pop(k)
-
-    def dict(self):
-        return {
-            "topics_and_types": self.topics_and_types,
-            "services_and_types": self.services_and_types,
-            "actions_and_types": self.actions_and_types,
-        }
 
 
 class RaiBaseNode(Node):
     def __init__(
         self,
+        whitelist: Optional[List[str]] = None,
         *args,
         **kwargs,
     ):
@@ -144,7 +65,7 @@ class RaiBaseNode(Node):
             self.DISCOVERY_FREQ,
             self.discovery,
         )
-        self.ros_discovery_info = NodeDiscovery(whitelist=None)
+        self.ros_discovery_info = NodeDiscovery(whitelist=whitelist)
         self.discovery()
         self.qos_profile = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -215,10 +136,9 @@ class RaiGenericBaseNode(RaiBaseNode):
         *args,
         **kwargs,
     ):
-        super().__init__(node_name, *args, **kwargs)
+        super().__init__(node_name=node_name, whitelist=whitelist, *args, **kwargs)
         self.llm = llm
 
-        self.whitelist = whitelist
         self.robot_state = dict()
         self.state_topics = observe_topics if observe_topics is not None else []
         self.state_postprocessors = (
@@ -233,20 +153,8 @@ class RaiGenericBaseNode(RaiBaseNode):
             Trigger, "rai_whoami_identity_service"
         )
 
-        self.DISCOVERY_FREQ = 2.0
-        self.DISCOVERY_DEPTH = 5
-
         self.callback_group = rclpy.callback_groups.MutuallyExclusiveCallbackGroup()
 
-        self.qos_profile = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.VOLATILE,
-            liveliness=LivelinessPolicy.AUTOMATIC,
-        )
-
-        self.state_subscribers = dict()
         self.initialize_robot_state_interfaces(self.state_topics)
 
         self.system_prompt = self.initialize_system_prompt(system_prompt)
@@ -310,6 +218,14 @@ class RaiGenericBaseNode(RaiBaseNode):
             self.state_subscribers[topic] = subscriber
 
 
+def parse_task_goal(ros_action_goal: TaskAction.Goal) -> Dict[str, Any]:
+    return dict(
+        task=ros_action_goal.task,
+        description=ros_action_goal.description,
+        priority=ros_action_goal.priority,
+    )
+
+
 class RaiNode(RaiGenericBaseNode):
     def __init__(
         self,
@@ -332,11 +248,7 @@ class RaiNode(RaiGenericBaseNode):
             **kwargs,
         )
 
-        # ---------- ROS Parameters ----------
-        self.task_topic = "/task_addition_requests"
-
         # ---------- ROS configuration ----------
-
         self.rosout_sub = self.create_subscription(
             rcl_interfaces.msg.Log,
             "/rosout",
@@ -347,8 +259,14 @@ class RaiNode(RaiGenericBaseNode):
 
         # ---------- Task Queue ----------
         self.task_action_server = ActionServer(
-            self, TaskAction, "perform_task", self.agent_loop
+            self,
+            TaskAction,
+            "perform_task",
+            execute_callback=self.agent_loop,
+            goal_callback=self.goal_callback,
         )
+        # Node is busy when task is executed. Only 1 task is allowed
+        self.busy = False
 
         # ---------- LLM Agents ----------
         self.AGENT_RECURSION_LIMIT = 100
@@ -358,51 +276,93 @@ class RaiNode(RaiGenericBaseNode):
         # self.agent_loop_thread = Thread(target=self.agent_loop)
         # self.agent_loop_thread.start()
 
-    def agent_loop(self, goal_handle: TaskAction.Goal):
-        self.get_logger().info(f"Received goal handle: {goal_handle}")
-        action_request = goal_handle.request
-        task = dict(
-            task=action_request.task,
-            description=action_request.description,
-            priority=action_request.priority,
-        )
-        self.get_logger().info(f"Received task: {task}")
+    def goal_callback(self, _) -> GoalResponse:
+        """Accept or reject a client request to begin an action."""
+        response = GoalResponse.REJECT if self.busy else GoalResponse.ACCEPT
+        self.get_logger().info(f"Received goal request. Response: {response}")
+        return response
 
-        # ---- LLM Task Handling ----
-        messages = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=f"Task: {task}"),
-        ]
+    async def agent_loop(self, goal_handle: ServerGoalHandle):
+        self.busy = True
+        try:
+            action_request: TaskAction.Goal = goal_handle.request
+            task: Dict[str, Any] = parse_task_goal(
+                action_request
+            )  # TODO(boczekbartek): base model and json
 
-        payload = State(messages=messages)
+            self.get_logger().info(f"Received task: {task}")
 
-        state: State = self.llm_app.invoke(
-            payload, {"recursion_limit": self.AGENT_RECURSION_LIMIT}
-        )  # type: ignore
+            # ---- LLM Task Handling ----
+            messages = [
+                SystemMessage(content=self.system_prompt),
+                HumanMessage(content=f"Task: {task}"),
+            ]
 
-        # ---- Share Action feedback ----
-        # TODO(boczekbartek): add graph node to langgraph which will send ros2 action feedback to HMI
+            payload = State(messages=messages)
 
-        # ---- Share Action Result ----
-        report = state["messages"][-1]
-        report = pformat(report.json())
+            state = None
+            for state in self.llm_app.stream(
+                payload, {"recursion_limit": self.AGENT_RECURSION_LIMIT}
+            ):
 
-        result = TaskAction.Result()
-        result.success = (
-            True  # TODO(boczekbartek): ask llm if the action has been successful
-        )
-        result.report = report
+                print(state.keys())
+                graph_node_name = list(state.keys())[0]
+                if graph_node_name == "reporter":
+                    continue
 
-        self.get_logger().info(f"Finished task:\n{report}")
-        self.clear_state()
+                msg = state[graph_node_name]["messages"][-1]
 
-        return report
+                if isinstance(msg, MultimodalMessage):
+                    last_msg = msg.text
+                else:
+                    last_msg = msg.content
+
+                feedback_msg = TaskAction.Feedback()
+                feedback_msg.current_status = f"{graph_node_name}: {last_msg}"
+
+                goal_handle.publish_feedback(feedback_msg)
+
+            # ---- Share Action Result ----
+            if state is None:
+                raise ValueError("No output from LLM")
+            print(state)
+
+            graph_node_name = list(state.keys())[0]
+            if graph_node_name != "reporter":
+                raise ValueError(f"Unexpected output llm node: {graph_node_name}")
+
+            report = state["reporter"]["messages"][
+                -1
+            ]  # TODO define graph more strictly not as dict key
+
+            if not isinstance(report, Report):
+                raise ValueError(f"Unexpected type of agent output: {type(report)}")
+
+            if report.success:
+                goal_handle.succeed()
+            else:
+                goal_handle.abort()
+
+            result = TaskAction.Result()
+            result.success = report.success
+            result.report = report.response_to_user
+
+            self.get_logger().info(f"Finished task:\n{result}")
+            self.clear_state()
+
+            return result
+        finally:
+            self.busy = False
 
     def set_app(self, app: CompiledGraph):
         self.llm_app = app
 
     def get_robot_state(self) -> Dict[str, str]:
         state_dict = dict()
+
+        if self.robot_state is None:
+            return state_dict
+
         for t in self.state_subscribers:
             if t not in self.robot_state:
                 msg = "No message yet"

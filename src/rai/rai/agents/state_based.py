@@ -17,6 +17,7 @@ import logging
 import pickle
 import time
 from functools import partial
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -76,20 +77,39 @@ class Report(BaseModel):
     steps: List[str] = Field(
         ..., title="Steps", description="The steps taken to solve the problem"
     )
+    success: bool = Field(
+        ..., title="Success", description="Whether the problem was solved"
+    )
     response_to_user: str = Field(
         ..., title="Response", description="The response to the user"
     )
 
 
-def get_stored_artifacts(tool_call_id: str) -> List[Any]:
-    with open("artifact_database.pkl", "rb") as file:
-        artifact_database = pickle.load(file)
+def get_stored_artifacts(
+    tool_call_id: str, db_path="artifact_database.pkl"
+) -> List[Any]:
+    # TODO(boczekbartek): refactor
+    db_path = Path(db_path)
+    if not db_path.is_file():
+        return []
+
+    with db_path.open("rb") as db:
+        artifact_database = pickle.load(db)
         if tool_call_id in artifact_database:
             return artifact_database[tool_call_id]
+
     return []
 
 
-def store_artifacts(tool_call_id: str, artifacts: List[Any]):
+def store_artifacts(
+    tool_call_id: str, artifacts: List[Any], db_path="artifact_database.pkl"
+):
+    # TODO(boczekbartek): refactor
+    db_path = Path(db_path)
+    if not db_path.is_file():
+        artifact_database = {}
+        with open("artifact_database.pkl", "wb") as file:
+            pickle.dump(artifact_database, file)
     with open("artifact_database.pkl", "rb") as file:
         artifact_database = pickle.load(file)
         if tool_call_id not in artifact_database:
@@ -283,7 +303,7 @@ def retriever_wrapper(
     info = str_output(retrieved_info)
     state["messages"].append(
         HumanMultimodalMessage(
-            content="Retrieved state: {}".format(info), images=images, audios=audios
+            content=f"Retrieved state: {info}", images=images, audios=audios
         )
     )
     return state
