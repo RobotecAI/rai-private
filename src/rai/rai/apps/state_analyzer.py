@@ -15,7 +15,7 @@
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 
 STATE_ANALYZER_PROMPT = """
 I am a part of a robot's supervising system. I am responsible for analyzing current robot's state with respect to the planned mission.

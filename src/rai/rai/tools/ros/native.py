@@ -27,7 +27,7 @@ import rosidl_runtime_py.set_message
 import rosidl_runtime_py.utilities
 import sensor_msgs.msg
 from langchain.tools import BaseTool
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from rclpy.impl.rcutils_logger import RcutilsLogger
 
 from .utils import convert_ros_img_to_base64, import_message_from_str
@@ -180,7 +180,7 @@ class TopicInput(Ros2BaseInput):
 
 
 class GetMsgFromTopic(Ros2BaseTool):
-    name = "get_msg_from_topic"
+    name: str = "get_msg_from_topic"
     description: str = "Get message from topic"
     args_schema: Type[TopicInput] = TopicInput
     response_format: str = "content_and_artifact"
@@ -195,7 +195,7 @@ class GetMsgFromTopic(Ros2BaseTool):
 
 
 class GetCameraImage(Ros2BaseTool):
-    name = "get_camera_image"
+    name: str = "get_camera_image"
     description: str = "get image from robots camera"
     response_format: str = "content_and_artifact"
     args_schema: Type[TopicInput] = TopicInput

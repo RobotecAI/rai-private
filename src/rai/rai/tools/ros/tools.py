@@ -22,9 +22,9 @@ from typing import Any, Dict, Type, cast
 import cv2
 import numpy as np
 from geometry_msgs.msg import Point, Quaternion, TransformStamped
-from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
 from nav_msgs.msg import OccupancyGrid
+from pydantic import BaseModel, Field
 from tf_transformations import euler_from_quaternion
 
 from rai.tools.ros.deprecated import SingleMessageGrabber
@@ -50,7 +50,7 @@ class AddDescribedWaypointToDatabaseToolInput(BaseModel):
 class AddDescribedWaypointToDatabaseTool(BaseTool):
     """Add described waypoint to the database tool."""
 
-    name = "AddDescribedWaypointToDatabaseTool"
+    name: str = "AddDescribedWaypointToDatabaseTool"
     description: str = (
         "A tool for adding a described waypoint to the database for later use. "
     )
@@ -242,7 +242,7 @@ class GetCurrentPositionToolInput(BaseModel):
 class GetCurrentPositionTool(BaseTool):
     """Get the current position of the robot."""
 
-    name = "GetCurrentPositionTool"
+    name: str = "GetCurrentPositionTool"
     description: str = "A tool for getting the current position of the robot."
 
     args_schema: Type[GetCurrentPositionToolInput] = GetCurrentPositionToolInput

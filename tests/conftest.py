@@ -28,7 +28,7 @@ from rai.config.models import BEDROCK_CLAUDE_HAIKU, OPENAI_MINI
 
 @pytest.fixture
 def rai_python_modules():
-    packages = glob.glob("src/*")
+    packages = glob.glob("src/rai*") + glob.glob("src/*/rai*")
     package_names = [os.path.basename(p) for p in packages]
     ros2_python_packages = []
     for package_path, package_name in zip(packages, package_names):

@@ -15,8 +15,7 @@
 
 from enum import Enum
 
-from langchain_core.pydantic_v1 import BaseModel
-from pydantic import UUID4
+from pydantic import UUID4, BaseModel
 
 
 class Priority(str, Enum):

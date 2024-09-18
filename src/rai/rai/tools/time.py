@@ -16,8 +16,8 @@
 import time
 from typing import Type
 
-from langchain.pydantic_v1 import BaseModel, Field
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field
 
 
 class WaitForSecondsToolInput(BaseModel):

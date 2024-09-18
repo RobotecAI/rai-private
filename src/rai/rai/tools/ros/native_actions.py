@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional, Tuple, Type
 import rosidl_runtime_py.set_message
 import rosidl_runtime_py.utilities
 from action_msgs.msg import GoalStatus
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from rclpy.action import ActionClient
 
 from .native import Ros2BaseTool
@@ -155,8 +155,10 @@ class Ros2CancelAction(Ros2BaseTool):
 
 
 class Ros2ListActionFeedbacks(Ros2BaseTool):
-    name = "Ros2ListActionFeedbacks"
-    description = "List intermediate feedbacks received during ros2 action. Feedbacks are sent before the action is completed."
+    name: str = "Ros2ListActionFeedbacks"
+    description: str = (
+        "List intermediate feedbacks received during ros2 action. Feedbacks are sent before the action is completed."
+    )
 
     args_schema: Type[OptionalActionUidInput] = OptionalActionUidInput
 

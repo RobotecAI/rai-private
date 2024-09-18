@@ -15,7 +15,7 @@
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 
 PLANNER_PROMPT = """
 I am a part of a robot's planning system. I am responsible for planning the robot's actions by splitting tasks in to atomic steps.
