@@ -23,7 +23,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/RAIGroundingDino.srv"
   "action/Task.action"
   "action/TaskFeedback.action"
-  DEPENDENCIES std_msgs vision_msgs sensor_msgs
+  "srv/WhatISee.srv"
+  DEPENDENCIES std_msgs vision_msgs sensor_msgs geometry_msgs
 )
 
 if(BUILD_TESTING)
