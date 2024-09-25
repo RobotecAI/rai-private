@@ -52,7 +52,7 @@ TBD
 5. Run rai agent:
 
    ```bash
-   ros launch ./src/examples/turtlebot.launch.xml \
+   ros launch ./src/examples/turtlebot4/turtlebot.launch.xml \
        game_launcher:=/path/to/simulation_binary/Turtlebot4.GameLauncher \
        robot_description_package:=turtlebot4_whoami
    ```
