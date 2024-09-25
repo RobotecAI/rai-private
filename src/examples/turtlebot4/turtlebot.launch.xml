@@ -15,7 +15,7 @@
   -->
 
 <launch>
-    <arg name="robot_description_package" default = ""/>
+    <arg name="robot_description_package" default = "turtlebot4_whoami"/>
     <arg name="game_launcher" default = ""/>
 
     <node pkg="rai_whoami" exec="rai_whoami_node" name="rai_whoami_node" output="screen">

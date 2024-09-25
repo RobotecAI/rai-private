@@ -53,8 +53,7 @@ TBD
 
    ```bash
    ros launch ./src/examples/turtlebot4/turtlebot.launch.xml \
-       game_launcher:=/path/to/simulation_binary/Turtlebot4.GameLauncher \
-       robot_description_package:=turtlebot4_whoami
+       game_launcher:=/path/to/simulation_binary/Turtlebot4.GameLauncher
    ```
 
 6. Open you internet browser and go to `localhost:8501`
