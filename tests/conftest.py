@@ -143,3 +143,9 @@ def pytest_terminal_summary(
 
 def pytest_configure(config: pytest.Config) -> None:
     config.pluginmanager.register(tracker, "usage_tracker")
+
+
+def pytest_make_parametrize_id(config, val, argname):
+    if config.option.verbose >= 2:  # -vv or -vvv
+        return f"{argname}={val}"
+    return repr(val)  # the default

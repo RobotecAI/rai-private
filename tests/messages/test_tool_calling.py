@@ -45,6 +45,7 @@ OLLAMA_URL = "http://localhost:11434"
     [
         ("ollama", "llama3.1:8b"),
         ("ollama", "llama3.2:3b"),
+        ("ollama", "llama3.1:70b"),
         ("ollama", "firefunction-v2"),
         ("ollama", "command-r-plus"),
         ("openai", "gpt-3.5-turbo"),
