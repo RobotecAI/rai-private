@@ -82,7 +82,7 @@ def test_ros2_topic_listing_tool(
     tools = [ros2_tool]
     llm = llm.bind_tools(tools)
     if render_tools_in_system_prompt:
-        system_prompt += f"\n{render_text_description(tools)}"  # type: ignore
+        system_prompt += f"\nHere are the available tools: {render_text_description(tools)}"  # type: ignore
 
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
 
