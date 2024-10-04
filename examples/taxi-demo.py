@@ -23,17 +23,10 @@ from langchain_core.tools import tool
 from std_msgs.msg import String
 
 from rai.agents.conversational_agent import create_conversational_agent
+from rai.tools.ros.cli import Ros2ServiceTool
+from rai.tools.ros.native import Ros2PubMessageTool
 from rai.utils.model_initialization import get_llm_model, get_tracing_callbacks
 from rai_hmi.api import GenericVoiceNode, split_message
-
-
-@tool
-def navigate(street: str, number: int, city: str, country: str) -> str:
-    """
-    Send the destination to the navigation system.
-    """
-    return f"Navigating to {street} {number}, {city}, {country}"
-
 
 system_prompt = """
 **System Role: Taxi Driver in Warsaw**
@@ -61,6 +54,40 @@ system_prompt = """
 class TaxiDemo(GenericVoiceNode):
     def __init__(self):
         super().__init__("taxi_demo_node", Queue(), "")
+
+        @tool
+        def navigate(street: str, number: int, city: str, country: str) -> str:
+            """
+            Send the destination to the Autoware system.
+            This is a mock example, so the goal pose is hardcoded.
+            In a real implementation, the goal pose should be retrieved from maps vendor (latitude and longitude)
+            and then converted to a pose in the map frame.
+            """
+            autoware_navigate_tool = Ros2PubMessageTool(node=self)
+            autoware_mode_tool = Ros2ServiceTool()
+            autoware_navigate_tool.run(
+                {
+                    "topic_name": "/planning/mission_planning/goal",
+                    "msg_type": "geometry_msgs/msg/PoseStamped",
+                    "msg_args": {
+                        "header": {"frame_id": "base_link"},
+                        "pose": {
+                            "position": {
+                                "x": 5.0,
+                                "y": 0.0,
+                                "z": 0.0,
+                            },  # since this is a mock example, we are using a position in front of the vehicle
+                            "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+                        },
+                    },
+                }
+            )
+            autoware_mode_tool.run(
+                tool_input={
+                    "command": "call /api/operation_mode/change_to_autonomous autoware_adapi_v1_msgs/srv/ChangeOperationMode"
+                }
+            )
+            return f"Navigating to {street} {number}, {city}, {country}"
 
         self.agent = create_conversational_agent(
             get_llm_model("complex_model"),
