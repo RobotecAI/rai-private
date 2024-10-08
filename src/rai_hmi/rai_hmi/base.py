@@ -199,7 +199,7 @@ class BaseHMINode(Node):
         try:
             faiss_index = FAISS.load_local(
                 get_package_share_directory(self.robot_description_package)
-                + "/description",
+                + "/description/generated",
                 get_embeddings_model(),
                 allow_dangerous_deserialization=True,
             )
