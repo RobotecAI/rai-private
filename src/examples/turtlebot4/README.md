@@ -10,7 +10,20 @@ TBD
 
 1. O3DE simulation setup
 
-   TBD
+   1. Download turtlebot4 simulation binary matching your platform from here (TODO link).
+
+      > **NOTE** If you would like to make changes to the simulation and create your own binary please follow this [README.md](https://github.com/RobotecAI/ROSCon2024Tutorial/README.md)
+
+   2. Unzip it:
+
+      ```bash
+      cd rai
+      # for Ubuntu 22.04 jammy and ros2 humlbe
+      unzip -d src/examples/turtlebot4/simulation Turtlebot4_PR1_jammyhumlbe.zip
+
+      # for Ubuntu 24.04 noble and ros2 jazzy
+      unzip -d src/examples/turtlebot4/simulation Turtlebot4_PR1_noblejazzy.zip
+      ```
 
 2. Clone and install [rai](https://github.com/RobotecAI/rai)
 
@@ -53,7 +66,7 @@ TBD
 
    ```bash
    ros launch ./src/examples/turtlebot4/turtlebot.launch.xml \
-       game_launcher:=/path/to/simulation_binary/Turtlebot4.GameLauncher
+       game_launcher:=./src/examples/turtlebot4/simulation/Turtlebot4.GameLauncher
    ```
 
 6. Open you internet browser and go to `localhost:8501`
