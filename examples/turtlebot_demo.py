@@ -32,6 +32,7 @@ from rai.tools.ros.native import (
     Ros2ShowMsgInterfaceTool,
 )
 from rai.tools.ros.native_actions import Ros2RunActionSync
+from rai.tools.ros.tools import GetCurrentPositionTool
 from rai.tools.time import WaitForSecondsTool
 
 
@@ -43,10 +44,24 @@ def main():
 
     SYSTEM_PROMPT = ""
 
+    ros2_whitelist = [
+        "/cmd_vel",
+        "/rosout",
+        "/map",
+        "/odom",
+        "/camera_image_color",
+        "/backup",
+        "/drive_on_heading",
+        "/navigate_through_poses",
+        "/navigate_to_pose",
+        "/spin",
+    ]
+
     node = RaiNode(
         llm=ChatOpenAI(
             model="gpt-4o-mini"
         ),  # smaller model used to describe the environment
+        whitelist=ros2_whitelist,
         system_prompt=SYSTEM_PROMPT,
     )
 
@@ -57,6 +72,7 @@ def main():
         Ros2ShowMsgInterfaceTool(),
         Ros2PubMessageTool(node=node),
         Ros2RunActionSync(node=node),
+        GetCurrentPositionTool(),
     ]
 
     state_retriever = node.get_robot_state
@@ -67,7 +83,17 @@ def main():
     Here are your tools:
     {render_text_description_and_args(tools)}
 
-    You can use ros2 topics, services and actions to operate. """
+    You can use ros2 topics, services and actions to operate.
+
+    Navigation tips:
+    - for driving forward/backward, if specified, ros2 actions are better.
+    - for driving for some specific time or in specific manner (like in circle) it good to use /cmd_vel topic
+    - you are currently unable to read map or point-cloud, so please avoid subscribing to such topics.
+    - if you are asked to drive towards some object, it's good to:
+        1. check the camera image and verify if objects can be seen
+        2. if only driving forward is required, do it
+        3. if obstacle avoidance might be required, use ros2 actions navigate_*, but first check your currect position, then very accurately estimate the goal pose.
+    """
 
     node.get_logger().info(f"{SYSTEM_PROMPT=}")
 
