@@ -1,0 +1,44 @@
+I am a detailed documentation for the RAI (Robot AI) framework, which is designed to enhance human-robot interaction through AI capabilities. Here are the key aspects:
+
+### Overview
+RAI is a flexible AI agent framework aimed at integrating generative AI features into robots. It supports multimodal interactions—text, voice, and visual data—allowing robots to operate effectively in various environments. The framework is built to be easily extensible, accommodating new functionalities and tools tailored to specific robotic tasks.
+
+### Key Features
+- **Voice and Text Interaction**: Facilitates seamless communication with the robot using natural language.
+- **Customizable Robot Identity**: Robots can define their capabilities, ethical code, and documentation to enhance interaction.
+- **Sensor Integration**: Utilizes cameras and other sensors to gather environmental data and respond to queries.
+- **Task Execution**: Capable of executing complex tasks dynamically through ROS interfaces.
+- **Tracing Capabilities**: Monitors and analyzes the performance of AI models with minimal overhead.
+
+### Architecture
+The framework consists of several components:
+- **RAI_WHOAMI**: Manages the robot’s identity and capabilities.
+- **RAI_HMI (Human-Machine Interface)**: Acts as the communication hub, processing input and generating output.
+- **RAI_TTS (Text-to-Speech)** and **RAI_ASR (Automatic Speech Recognition)**: Handle voice interactions.
+- **Custom Tools**: Users can define specific tools for unique robotic functionalities.
+
+### Capabilities
+- **Multimodal Message Support**: Allows integration of different data types (text, images, audio).
+- **Dynamic Task Management**: The RAI agent can adjust tasks based on real-time inputs and environmental changes.
+- **Extensible Tool Integration**: Developers can add new functionalities through a simple decorator mechanism.
+
+### Development Environment
+- **Setup Instructions**: RAI uses Poetry for dependency management. The installation process includes cloning the repository, installing dependencies, and setting up ROS.
+- **Vendor Integration**: The framework is vendor-agnostic, supporting various AI models (e.g., OpenAI, Ollama, AWS Bedrock).
+
+### Limitations
+- The framework is in beta, and users may encounter issues as it evolves.
+- Performance may vary based on the selected AI vendor and configuration.
+
+### Usage and Configuration
+- Tracing and monitoring can be configured through the `config.toml` file.
+- Developers can implement and register custom tools to extend the robot's capabilities.
+
+### Community and Support
+- Users are encouraged to contribute and provide feedback as the framework develops.
+- Resources include a developer guide, demos, and community discussions for troubleshooting and feature requests.
+
+### Example Applications
+- The framework supports various applications, such as autonomous navigation, manipulation tasks, and environmental inspection using robots.
+
+In summary, RAI is a comprehensive framework designed to enhance the capabilities of robots through AI, providing a robust platform for developers to build and deploy intelligent robotic solutions.

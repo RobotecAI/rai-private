@@ -25,12 +25,14 @@ DEFAULT_SUPPORTED_FILETYPES: List[Annotated[str, 'filetype e.g. ".txt"']] = [
     ".txt",
     ".pdf",
     ".docx",
+    ".md",
 ]
 
 DEFAULT_PARSERS: Dict[Annotated[str, 'filetype e.g. ".txt."'], Type[BaseLoader]] = {
     ".txt": TextLoader,
     ".pdf": PyPDFLoader,
     ".docx": Docx2txtLoader,
+    ".md": TextLoader,
 }
 
 
