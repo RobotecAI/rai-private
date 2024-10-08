@@ -66,7 +66,11 @@ TBD
    - Is it able to bring you something from the kitchen? (testing robot's identity)
    - What are its ros2 interfaces (discovery of ros2 interfaces)
    - tell me what you see (interpretation of camera image)
-   - Drive forward (interaction with the robot using discovered ros2 interfaces)
+   - Drive towards the table (when table is not visible, robot rejects task that it cannot do)
+   - Spin left by 90 degrees (interaction with the robot using ros2 interfaces) - table with the robotic are shoud be visible in the camera
+   - Use robotic arm to pick up a box from the table (identity and intefaces doesn't allow it)
+   - Drive towards the table (when table is visible, testing ability to interpret camera image and perform actions based on the knowledge)
+   - Drive behind the table (likely will fail in current `rai` version due to limitations in spatial reasoning)
 
 ### Troubleshooting
 
