@@ -15,16 +15,14 @@
 
 import logging
 from functools import partial
-from typing import List, Optional, TypedDict, Union
+from typing import Any, List, Literal, Optional, TypedDict, Union
 
 from langchain.chat_models.base import BaseChatModel
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import AnyMessage, BaseMessage, SystemMessage
 from langchain_core.tools import BaseTool
-from langgraph.graph import START, StateGraph
-from langgraph.prebuilt.tool_node import tools_condition
+from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, ValidationError
 from rclpy.impl.rcutils_logger import RcutilsLogger
-
-from rai.agents.tool_runner import ToolRunner
 
 loggers_type = Union[RcutilsLogger, logging.Logger]
 
@@ -48,10 +46,50 @@ def agent(llm: BaseChatModel, logger: loggers_type, system_prompt: str, state: S
     return state
 
 
+def reporter(
+    llm: BaseChatModel, logger: loggers_type, state: State, report_template: BaseModel
+):
+    logger.info("Summarizing the conversation")
+    n_tries = 5
+    ai_msg = None
+    for i in range(n_tries):
+        try:
+            ai_msg = llm.with_structured_output(report_template).invoke(
+                state["messages"]
+            )
+            break
+        except ValidationError:
+            logger.info(
+                f"Failed to summarize using given template. Repeating: {i}/{n_tries}"
+            )
+
+    if ai_msg is None:
+        logger.info("Failed to summarize. Trying without template")
+        ai_msg = llm.invoke(state["messages"])
+
+    state["messages"].append(ai_msg)
+    return state
+
+
+def tools_condition(
+    state: Union[list[AnyMessage], dict[str, Any]],
+) -> Literal["tools", "reporter"]:
+    if isinstance(state, list):
+        ai_message = state[-1]
+    elif messages := state.get("messages", []):
+        ai_message = messages[-1]
+    else:
+        raise ValueError(f"No messages found in input state to tool_edge: {state}")
+    if hasattr(ai_message, "tool_calls") and len(ai_message.tool_calls) > 0:
+        return "tools"
+    return "reporter"
+
+
 def create_conversational_agent(
     llm: BaseChatModel,
     tools: List[BaseTool],
     system_prompt: str,
+    report_template=None,
     logger: Optional[RcutilsLogger | logging.Logger] = None,
     debug=False,
 ):
@@ -63,20 +101,17 @@ def create_conversational_agent(
 
     _logger.info("Creating state based agent")
 
-    llm_with_tools = llm.bind_tools(tools)
-    tool_node = ToolRunner(tools=tools, logger=_logger)
+    llm_with_tools = llm
 
     workflow = StateGraph(State)
-    workflow.add_node("tools", tool_node)
     workflow.add_node("thinker", partial(agent, llm_with_tools, _logger, system_prompt))
+    workflow.add_node(
+        "reporter", partial(reporter, llm, _logger, report_template=report_template)
+    )
 
     workflow.add_edge(START, "thinker")
-    workflow.add_edge("tools", "thinker")
-
-    workflow.add_conditional_edges(
-        "thinker",
-        tools_condition,
-    )
+    workflow.add_edge("thinker", "reporter")
+    workflow.add_edge("reporter", END)
 
     app = workflow.compile(debug=debug)
     _logger.info("State based agent created")

@@ -128,7 +128,6 @@ class BaseHMINode(Node):
         self.faiss_index = self._load_documentation()
         self.tools = self._initialize_available_tools()
 
-        # TODO(boczekbartek): refactor, becuase mixin needs state
         self.initialize_task_action_client_and_server()
         self.task_running = dict()
         self.task_feedbacks = queue
