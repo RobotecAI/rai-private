@@ -103,7 +103,9 @@ def decider(
     return state
 
 
-def reporter(llm: BaseChatModel, logger: loggers_type, state: State):
+def reporter(
+    llm: BaseChatModel, logger: loggers_type, state: State, report_template: BaseModel
+):
     logger.info("Summarizing the conversation")
     prompt = (
         "You are the reporter. Your task is to summarize what happened previously. "
@@ -113,7 +115,7 @@ def reporter(llm: BaseChatModel, logger: loggers_type, state: State):
     ai_msg = None
     for i in range(n_tries):
         try:
-            ai_msg = llm.with_structured_output(Report).invoke(
+            ai_msg = llm.with_structured_output(report_template).invoke(
                 [SystemMessage(content=prompt)] + state["messages"]
             )
             break
@@ -155,6 +157,7 @@ def create_state_based_agent(
     llm: BaseChatModel,
     tools: List[BaseTool],
     state_retriever: Callable[[], Dict[str, Any]],
+    report_template=Report,
     logger: Optional[RcutilsLogger | logging.Logger] = None,
 ) -> CompiledGraph:
     _logger = None
@@ -175,7 +178,9 @@ def create_state_based_agent(
     workflow.add_node("tools", tool_node)
     # workflow.add_node("thinker", partial(thinker, llm, _logger))
     workflow.add_node("decider", partial(decider, llm_with_tools, _logger))
-    workflow.add_node("reporter", partial(reporter, llm, _logger))
+    workflow.add_node(
+        "reporter", partial(reporter, llm, _logger, report_template=report_template)
+    )
 
     workflow.add_edge(START, "state_retriever")
     workflow.add_edge("state_retriever", "decider")

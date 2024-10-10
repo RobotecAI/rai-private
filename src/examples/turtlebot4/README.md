@@ -76,7 +76,7 @@ TBD
 
    For example you can try:
 
-   - Is it able to bring you something from the kitchen? (testing robot's identity)
+   - Please bring me something from the kitchen. (testing robot's identity)
    - What are its ros2 interfaces (discovery of ros2 interfaces)
    - tell me what you see (interpretation of camera image)
    - Drive towards the table (when table is not visible, robot rejects task that it cannot do)
